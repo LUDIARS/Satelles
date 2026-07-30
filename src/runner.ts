@@ -132,6 +132,21 @@ export async function runSatelles(config: SatellesRunConfig, deps?: RunnerDeps):
   process.once("SIGINT", stop);
   process.once("SIGTERM", stop);
 
+  // 委託 run の終了報告 (best-effort)。二重報告防止に一度だけ送る。
+  let runStatusReported = false;
+  const reportRunStatus = async (
+    status: "completed" | "failed",
+    detail?: string,
+  ): Promise<void> => {
+    if (!config.delegationRunId || !concordia || !registered || runStatusReported) return;
+    runStatusReported = true;
+    const ok = await concordia.postDelegationRunStatus(config.delegationRunId, {
+      status,
+      ...(detail ? { detail: detail.slice(0, 4_000) } : {}),
+    });
+    if (!ok) log(`delegation run status report failed (run=${config.delegationRunId})`);
+  };
+
   try {
     const preamble = assemblePreamble({
       cwd: config.cwd,
@@ -185,6 +200,10 @@ export async function runSatelles(config: SatellesRunConfig, deps?: RunnerDeps):
     }
 
     await session.close();
+    await reportRunStatus("completed");
+  } catch (error) {
+    await reportRunStatus("failed", (error as Error).message);
+    throw error;
   } finally {
     process.removeListener("SIGINT", stop);
     process.removeListener("SIGTERM", stop);
