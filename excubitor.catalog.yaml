@@ -1,0 +1,15 @@
+# Excubitor catalog 断片 (Excubitor/catalog/FRAGMENTS.md 方式)。
+# Satelles は常駐サービスではなく per-session の headless ランナー CLI。
+# lifecycle 管理対象ではないため monitor_only とし、port / health は持たない。
+services:
+  - code: satelles
+    name: Satelles (headless Codex runner)
+    tier: local-app
+    project_code: satelles
+    repo: https://github.com/LUDIARS/Satelles.git
+    runtime: node
+    cwd: ${ARS_ROOT}/Satelles
+    command: npm run build
+    autostart: false
+    monitor_only: true
+    restart_policy: "no"
