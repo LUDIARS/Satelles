@@ -1,0 +1,26 @@
+{
+  "name": "@ludiars/satelles",
+  "version": "0.1.0",
+  "description": "SDK-style headless Codex agent runner for LUDIARS — no terminal window, no PTY, no rollout tailing",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "satelles": "bin/satelles.mjs"
+  },
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "tsx --test tests/*.test.ts"
+  },
+  "dependencies": {
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  }
+}
