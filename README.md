@@ -33,6 +33,13 @@ API キーのどちらでもそのまま使える (`account/read` 経由で検�
   wt.exe spawn の代わりに `satelles run` をヘッドレス起動するだけでよい。
 - **Discord リレー**: 全イベントを Concordia `transcript-frame` へ順序保証 POST
   (Lictor と同じ OrderedTranscriptSink)。egress 側は既存のまま。
+- **停滞ターンの打ち切り**: ターンのイベントが `--stall-timeout-ms` 途絶えたら
+  停滞として打ち切り、Concordia へ degraded を報告する。期限は用途で分ける —
+  `serve` は既定かつ上限 5 分 (人間が待つ時間)、one-shot は無進捗上限なし、
+  委託 run (TaskWorkflow) は無進捗・絶対どちらの期限も持たない (長時間処理は
+  TaskWorkflow の仕事)。対話セッションはキュー済みの inject を順序どおり保ったまま
+  次の入力から再開し、one-shot は失敗として終了する。`--turn-timeout-ms`
+  (standalone 既定 4 時間) は最後の安全弁。
 
 ## CLI
 

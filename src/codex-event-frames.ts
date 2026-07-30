@@ -36,6 +36,16 @@ export function notificationThreadId(notification: CodexRpcNotification): string
   return parsed.success ? parsed.data.threadId ?? null : null;
 }
 
+/**
+ * notification が属する turn id (`turnId` 直下、無ければ `turn.id`)。
+ * 打ち切った turn の後追いイベントを識別するのに使う。
+ */
+export function notificationTurnId(notification: CodexRpcNotification): string | null {
+  const parsed = ParamsSchema.safeParse(notification.params);
+  if (!parsed.success) return null;
+  return parsed.data.turnId ?? parsed.data.turn?.id ?? null;
+}
+
 /** Converts authoritative App Server completion events to allowlisted frames. */
 export class CodexEventFrameMapper {
   private readonly seen = new Set<string>();

@@ -7,6 +7,7 @@ import {
 import {
   CodexEventFrameMapper,
   notificationThreadId,
+  notificationTurnId,
   parseTurnCompletion,
 } from "./codex-event-frames.js";
 import {
@@ -14,6 +15,7 @@ import {
   type CodexSessionIdentity,
 } from "./codex-bootstrap.js";
 import type { TranscriptFrameSink } from "./transcript-sink.js";
+import { TurnStallTimer, type TurnStallTimerScheduler } from "./turn-stall-timer.js";
 
 const TurnStartResponseSchema = z.object({
   turn: z.object({
@@ -35,7 +37,9 @@ export type CodexTurnErrorCode =
   | "codex_turn_start_failed"
   | "codex_turn_failed"
   | "codex_thread_mismatch"
-  | "codex_turn_timeout";
+  | "codex_turn_timeout"
+  /** イベントが途絶えたまま無進捗になった (絶対上限より手前で検知する)。 */
+  | "codex_turn_stalled";
 
 export class CodexTurnError extends Error {
   constructor(
@@ -65,7 +69,17 @@ export interface StartSatellesCodexSessionOptions {
 export interface RunTurnOptions {
   prompt: string;
   cwd: string;
-  turnTimeoutMs?: number;
+  /** 絶対上限。null で無効 (委託 run は TaskWorkflow が期限を持つ)。 */
+  turnTimeoutMs?: number | null;
+  /**
+   * ターンのイベントが 1 本も来なくなってから停滞と判定するまでの間隔。
+   * null で無効。絶対上限 (turnTimeoutMs) は最後の安全弁として別に効く。
+   */
+  stallTimeoutMs?: number | null;
+  /** テスト用の時計差し替え。 */
+  stallScheduler?: TurnStallTimerScheduler;
+  /** 停滞を検知したときの通知 (best-effort。投げても turn の結果は変えない)。 */
+  onStall?: (info: { turnId: string | null; idleMs: number }) => void;
   /** 既定 false (delegation 同等)。対話用途では true を推奨。 */
   networkAccess?: boolean;
 }
@@ -78,6 +92,29 @@ export interface TurnResult {
 }
 
 const DEFAULT_TURN_TIMEOUT_MS = 4 * 60 * 60 * 1_000;
+/**
+ * `stallTimeoutMs` 未指定時の保険値 (ライブラリとしての既定)。
+ *
+ * 4 時間の絶対上限だけでは、イベントが途絶えたターン (2026-07-30 incident:
+ * turn/started の後 15 分で無音になり turn/completed が来ない) を何時間も
+ * 「作業中」に見せたまま、後続の inject を消費できない状態が続く。
+ *
+ * CLI から来る実運用の期限はここではなく `config.ts` のポリシーが決める
+ * (serve は既定かつ上限 5 分、one-shot は既定無し、委託 run は null)。
+ * runner は必ず明示値か null を渡すので、この値が効くのは
+ * `runTurn` を直接呼ぶ経路だけ。
+ */
+const DEFAULT_STALL_TIMEOUT_MS = 10 * 60 * 1_000;
+
+/**
+ * 覚えておく「打ち切った turn」の上限。
+ *
+ * 通常は当該 turn の `turn/completed` を観測した時点で忘れるが、その
+ * イベントはターン間 (notification listener を外している窓) に届くことが
+ * あり、その場合 id は残り続ける。長寿命の interactive セッションで
+ * 際限なく溜めないための保険。
+ */
+const MAX_ABANDONED_TURN_IDS = 32;
 
 /**
  * 1 本の `codex app-server` プロセスに 1 thread を束ね、複数ターンを
@@ -90,6 +127,14 @@ const DEFAULT_TURN_TIMEOUT_MS = 4 * 60 * 60 * 1_000;
  */
 export class SatellesCodexSession {
   private turning = false;
+  /**
+   * 停滞として打ち切った turn の id。app-server 側ではその turn がまだ生きて
+   * いる可能性があり、後から item/completed や turn/completed が飛んでくる。
+   * 次ターンがそれを自分のイベントと取り違えると (turn id 未確定の窓では
+   * 即座に「完了」、確定後は codex_thread_mismatch でセッションごと落ちる)
+   * 停滞回復そのものが壊れるので、ここで持ち主を覚えて無視する。
+   */
+  private readonly abandonedTurnIds = new Set<string>();
 
   private constructor(
     public readonly client: CodexAppServerClient,
@@ -159,9 +204,20 @@ export class SatellesCodexSession {
     this.client.terminate();
   }
 
+  /** 打ち切った turn を記録する (古いものから捨てて上限を超えない)。 */
+  private rememberAbandonedTurn(turnId: string): void {
+    this.abandonedTurnIds.add(turnId);
+    while (this.abandonedTurnIds.size > MAX_ABANDONED_TURN_IDS) {
+      const oldest: string | undefined = this.abandonedTurnIds.values().next().value;
+      if (oldest === undefined) break;
+      this.abandonedTurnIds.delete(oldest);
+    }
+  }
+
   private async runTurnInner(options: RunTurnOptions): Promise<TurnResult> {
     let activeTurnId: string | null = null;
     let settled = false;
+    let terminalReceived = false;
     const agentTexts: string[] = [];
     let resolveCompletion: ((status: string) => void) | null = null;
     let rejectCompletion: ((error: Error) => void) | null = null;
@@ -169,9 +225,57 @@ export class SatellesCodexSession {
       resolveCompletion = resolve;
       rejectCompletion = reject;
     });
+    // completionPromise は turn/start が返ってから初めて await される。その手前で
+    // notification ハンドラや停滞タイマが reject すると、ハンドラ未装着のまま
+    // unhandledRejection になり Satelles プロセスごと落ちる (turn/start 自体が
+    // 失敗する経路では最後まで await されない)。空の catch を先に付けて
+    // 「処理済み」にしておく — 後段の await は通常どおり reject を受け取る。
+    void completionPromise.catch(() => undefined);
+
+    // 無進捗ウォッチドッグ: 権威ある notification のたびに延長し、途絶えたら
+    // 停滞として turn を終わらせる。これが無いと絶対上限まで runner が
+    // runTurn を await したまま、キュー済みの inject を消費できない。
+    // null は「無効」(委託 run は TaskWorkflow が期限を持つ)。
+    const stallTimeoutMs = options.stallTimeoutMs === null
+      ? null
+      : positiveInt(options.stallTimeoutMs, DEFAULT_STALL_TIMEOUT_MS);
+    let lastProgressAt = Date.now();
+    const stallTimer = new TurnStallTimer(stallTimeoutMs, () => {
+      if (settled) return;
+      settled = true;
+      // 打ち切った turn は app-server 側でまだ生きている可能性がある。
+      if (activeTurnId) this.rememberAbandonedTurn(activeTurnId);
+      const idleMs = Date.now() - lastProgressAt;
+      try {
+        options.onStall?.({ turnId: activeTurnId, idleMs });
+      } catch {
+        // 通知は落としてよい。停滞の報告自体で turn を壊さない。
+      }
+      rejectCompletion?.(new CodexTurnError(
+        "codex_turn_stalled",
+        `Codex turn produced no events for ${Math.round(idleMs / 1_000)}s`,
+      ));
+    }, options.stallScheduler);
 
     const unsubscribe = this.client.onNotification((notification) => {
       if (settled) return;
+      const observedTurnId = this.abandonedTurnIds.size > 0
+        ? notificationTurnId(notification)
+        : null;
+      if (observedTurnId && this.abandonedTurnIds.has(observedTurnId)) {
+        // 打ち切った turn のゾンビイベント。転記面には出す (Discord 側の
+        // 記録は正直なままにする) が、現ターンの進捗・完了・agentText には
+        // 一切数えない。ウォッチドッグの延長にも使わない。
+        const zombie = this.mapper.map(notification);
+        if (zombie) void this.sink.post(zombie.kind, zombie.payload).catch(() => undefined);
+        // その turn が完了したなら、もう後追いイベントは来ない。長寿命の
+        // interactive セッションで停滞が繰り返されても id が溜まり続けない
+        // よう、ここで持ち主を忘れる。
+        if (notification.method === "turn/completed") {
+          this.abandonedTurnIds.delete(observedTurnId);
+        }
+        return;
+      }
       const observedThreadId = notificationThreadId(notification);
       if (observedThreadId && observedThreadId !== this.identity.threadId) {
         settled = true;
@@ -180,6 +284,12 @@ export class SatellesCodexSession {
           `received ${notification.method} for an unexpected Codex thread`,
         ));
         return;
+      }
+      // 進捗として数えるのは束ねた thread のイベントだけ。他 thread の音で
+      // ウォッチドッグを延ばすと、止まった turn を生きていると誤認する。
+      if (observedThreadId === this.identity.threadId) {
+        lastProgressAt = Date.now();
+        stallTimer.progress();
       }
 
       collectAgentText(notification.method, notification.params, this.identity.threadId, agentTexts);
@@ -205,6 +315,11 @@ export class SatellesCodexSession {
         ));
         return;
       }
+      // Codex 側は終端イベントに到達した。ここから先の待ちは transcript の
+      // 永続化 (独自のリトライ上限を持つ) であって turn の停滞ではないので、
+      // ウォッチドッグを止める。
+      terminalReceived = true;
+      stallTimer.stop();
       void framePost
         .then(() => this.sink.flush())
         .then(() => {
@@ -257,15 +372,27 @@ export class SatellesCodexSession {
         );
       }
       activeTurnId = turnResult.data.turn.id;
+      // 万一 app-server が turn id を再利用しても、現ターンを打ち切り済み
+      // 扱いにして無視し続けることが無いようにする。
+      this.abandonedTurnIds.delete(activeTurnId);
+      // turn/start が返った時点から計測する: 最初のイベントが 1 本も来ない
+      // ケース (incident の形) もここで拾える。ただし turn/completed が
+      // turn/start の応答より先に届いていたら、もう待つものは無い。
+      lastProgressAt = Date.now();
+      if (!terminalReceived) stallTimer.start();
 
-      const status = await withTimeout(
-        completionPromise,
-        positiveInt(options.turnTimeoutMs, DEFAULT_TURN_TIMEOUT_MS),
-        () => new CodexTurnError("codex_turn_timeout", "Codex turn timed out"),
-      );
+      // 絶対上限は最後の安全弁。null は「無効」(委託 run は TaskWorkflow が期限を持つ)。
+      const status = options.turnTimeoutMs === null
+        ? await completionPromise
+        : await withTimeout(
+          completionPromise,
+          positiveInt(options.turnTimeoutMs, DEFAULT_TURN_TIMEOUT_MS),
+          () => new CodexTurnError("codex_turn_timeout", "Codex turn timed out"),
+        );
       return { status, agentText: agentTexts.join("\n") };
     } finally {
       settled = true;
+      stallTimer.stop();
       unsubscribe();
     }
   }
@@ -307,7 +434,7 @@ function withTimeout<T>(
   });
 }
 
-function positiveInt(value: number | undefined, fallback: number): number {
+function positiveInt(value: number | null | undefined, fallback: number): number {
   return typeof value === "number" && Number.isInteger(value) && value > 0
     ? value
     : fallback;

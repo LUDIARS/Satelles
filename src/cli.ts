@@ -18,7 +18,17 @@ Options:
   --network                allow network access inside the sandbox
   --skills-dir <dir>       inject <dir>/<name>/SKILL.md (or <name>.md) as prompt preamble
   --no-memory              skip repo memory digest injection
-  --turn-timeout-ms <n>    per-turn timeout (default 4h)
+  --stall-timeout-ms <n>   no-progress timeout, max 300000ms (serve default: 300000ms;
+                           one-shot: off unless set)
+  --turn-timeout-ms <n>    absolute per-turn timeout (standalone default 4h)
+
+Timeout policy:
+  serve                    a stalled turn is dropped after at most 5 minutes,
+                           and the session resumes from the next input
+  one-shot                 absolute timeout only; with --stall-timeout-ms,
+                           a stalled turn fails the run
+  delegated TaskWorkflow   no stall or absolute turn timeout (TaskWorkflow owns
+                           it); passing either timeout flag is a config error
 
 Env:
   CONCORDIA_DELEGATION_PROMPT_FILE  rendered delegation prompt (Cc contract; overrides --prompt-file)

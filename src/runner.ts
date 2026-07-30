@@ -12,7 +12,7 @@
 
 import { parseAskMarkerText } from "./ask-marker.js";
 import { buildCodexChildEnv } from "./child-env.js";
-import { SatellesCodexSession } from "./codex-session.js";
+import { CodexTurnError, SatellesCodexSession } from "./codex-session.js";
 import { buildConfigOverrides, type SatellesRunConfig } from "./config.js";
 import {
   ConcordiaClient,
@@ -133,6 +133,8 @@ export async function runSatelles(config: SatellesRunConfig, deps?: RunnerDeps):
   process.once("SIGINT", stop);
   process.once("SIGTERM", stop);
 
+  // 停滞警告を Concordia の状態カードに出しているか (復帰時に消すため)。
+  let stallNoticeVisible = false;
   // 委託 run の終了報告 (best-effort)。二重報告防止に一度だけ送る。
   let runStatusReported = false;
   const reportRunStatus = async (
@@ -167,12 +169,49 @@ export async function runSatelles(config: SatellesRunConfig, deps?: RunnerDeps):
     }
 
     for (;;) {
-      const result = await session.runTurn({
-        prompt: nextInput,
-        cwd: config.cwd,
-        networkAccess: config.networkAccess,
-        turnTimeoutMs: config.turnTimeoutMs,
-      });
+      let result: Awaited<ReturnType<typeof session.runTurn>>;
+      try {
+        result = await session.runTurn({
+          prompt: nextInput,
+          cwd: config.cwd,
+          networkAccess: config.networkAccess,
+          turnTimeoutMs: config.turnTimeoutMs,
+          stallTimeoutMs: config.stallTimeoutMs,
+          onStall: ({ turnId, idleMs }) => {
+            log(`codex turn stalled (turn=${turnId ?? "n/a"} idle=${Math.round(idleMs / 1_000)}s)`);
+          },
+        });
+      } catch (error) {
+        if (!isStalledTurn(error)) throw error;
+        // 停滞したターンは、キュー済みの inject を何時間も人質に取る。ここで
+        // ターンを手放し、セッションが「作業中」を演じ続けないよう degraded を
+        // 表に出す。inject は InputQueue に順序どおり残っているので、対話
+        // セッションは次の入力から再開できる。
+        // 実際に ⚠️ を出せたときだけ「出している」と記録する。出せていない
+        // のに復帰時の取り下げを走らせると、無関係な current_task を
+        // "recovered from a stalled turn" で潰してしまう。
+        stallNoticeVisible = await reportStall(
+          concordia,
+          registered,
+          config.sessionId,
+          (error as Error).message,
+        );
+        // 転記面にも 1 行残す: Discord 側は transcript しか見ていないので、
+        // ここで黙ると「急に無言になった」だけの記録になる。
+        await announceStall(sink, config.stallTimeoutMs, config.interactive, log);
+        if (!config.interactive) throw error;
+        log("recovering from stalled turn; waiting for the next input");
+        const next = await inputs.take();
+        nextInput = next.text;
+        continue;
+      }
+
+      if (stallNoticeVisible) {
+        // 復帰したのに ⚠️ を出したままにすると、今度は逆に動いている
+        // セッションを止まっていると誤読させる。
+        stallNoticeVisible = false;
+        await clearStallNotice(concordia, registered, config.sessionId);
+      }
 
       const ask = parseAskMarkerText(result.agentText);
       if (ask) {
@@ -211,6 +250,101 @@ export async function runSatelles(config: SatellesRunConfig, deps?: RunnerDeps):
     session.terminate();
     liveness?.close();
     if (concordia && registered) await concordia.unregister(config.sessionId);
+  }
+}
+
+/** 無進捗で打ち切られたターンか。 */
+export function isStalledTurn(error: unknown): boolean {
+  return error instanceof CodexTurnError && error.code === "codex_turn_stalled";
+}
+
+/**
+ * 停滞を Concordia へ表に出す (best-effort)。
+ *
+ * これが無いと、セッションは last_seen_at が止まったまま `active` に見え続け、
+ * 人間からは「作業中」と区別できない。イベントは Cc 側の可視面
+ * (状態カード / エラー通知) が拾う。
+ *
+ * 戻り値は `current_task` に警告を出せたか (= 復帰時に取り下げるべきか)。
+ */
+async function reportStall(
+  concordia: ConcordiaClient | null,
+  registered: boolean,
+  sessionId: string,
+  detail: string,
+): Promise<boolean> {
+  if (!concordia || !registered) return false;
+  try {
+    await concordia.event(sessionId, {
+      kind: "codex_turn_stalled",
+      payload: { detail },
+    });
+    await concordia.patchSession(sessionId, {
+      current_task: `⚠️ codex turn stalled — ${detail}`,
+    });
+    return true;
+  } catch {
+    // 監視面への報告失敗でセッションを落とさない。
+    return false;
+  }
+}
+
+/** ミリ秒を人間向けの長さ表現へ。 */
+function formatStallTimeout(timeoutMs: number | null): string {
+  if (timeoutMs === null) return "";
+  const minutes = timeoutMs / 60_000;
+  return Number.isInteger(minutes) ? `${minutes} 分` : `${Math.round(timeoutMs / 1_000)} 秒`;
+}
+
+/**
+ * 停滞を転記面へ 1 行出す (best-effort)。
+ *
+ * Discord から見えるのは transcript だけなので、ここに出さないと停滞は
+ * 「返事が来なくなった」以上の情報を持たない。対話は次の入力で再開できる旨、
+ * one-shot / 委託は失敗として終わる旨まで書いて、人間の次の一手を決められる
+ * ようにする。
+ */
+async function announceStall(
+  sink: TranscriptFrameSink,
+  stallTimeoutMs: number | null,
+  interactive: boolean,
+  log: (message: string) => void,
+): Promise<void> {
+  const idleText = stallTimeoutMs === null
+    ? "Codex の進捗が途絶えたため"
+    : `Codex の進捗が ${formatStallTimeout(stallTimeoutMs)}途絶えたため`;
+  const text = interactive
+    ? `Satelles: ${idleText}、このターンを打ち切りました。次の入力から再開できます。`
+    : `Satelles: ${idleText}、このセッションを失敗として終了します。`
+      + "長時間処理は TaskWorkflow で実行してください。";
+  log(text);
+  try {
+    await sink.post("text", {
+      role: "assistant",
+      text,
+      phase: "final",
+      error_code: "codex_turn_stalled",
+      timeout_ms: stallTimeoutMs,
+    });
+    await sink.flush();
+  } catch (error) {
+    log(`stall relay failed: ${(error as Error).message}`);
+  }
+}
+
+/** 停滞警告の取り下げ (best-effort。reportStall と対になる)。 */
+async function clearStallNotice(
+  concordia: ConcordiaClient | null,
+  registered: boolean,
+  sessionId: string,
+): Promise<void> {
+  if (!concordia || !registered) return;
+  try {
+    await concordia.patchSession(sessionId, {
+      current_task: "recovered from a stalled turn",
+    });
+  } catch {
+    // 同上。
   }
 }
 

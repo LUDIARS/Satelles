@@ -3,7 +3,14 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { buildConfigOverrides, parseRunConfig } from "../src/config.js";
+import { fileURLToPath } from "node:url";
+import {
+  buildConfigOverrides,
+  MAX_INTERACTIVE_STALL_TIMEOUT_MS,
+  parseRunConfig,
+} from "../src/config.js";
+
+const THIS_FILE = fileURLToPath(import.meta.url);
 
 const BARE_ENV = {} as NodeJS.ProcessEnv;
 
@@ -67,4 +74,45 @@ test("buildConfigOverrides: model / effort を codex -c 形式へ", () => {
     buildConfigOverrides({ model: "gpt-5.6-sol", effort: "xhigh" }),
     ['model="gpt-5.6-sol"', 'model_reasoning_effort="xhigh"'],
   );
+});
+
+test("parseRunConfig: serve は既定で 5 分の無進捗上限を持つ", () => {
+  const { config, errors } = parseRunConfig(["--interactive"], BARE_ENV);
+  assert.deepEqual(errors, []);
+  assert.equal(config.stallTimeoutMs, MAX_INTERACTIVE_STALL_TIMEOUT_MS);
+});
+
+test("parseRunConfig: 無進捗上限は 5 分以下でのみ変更できる", () => {
+  const { config, errors } = parseRunConfig(
+    ["--interactive", "--stall-timeout-ms", "120000"],
+    BARE_ENV,
+  );
+  assert.deepEqual(errors, []);
+  assert.equal(config.stallTimeoutMs, 120_000);
+
+  const invalid = parseRunConfig(["--interactive", "--stall-timeout-ms", "300001"], BARE_ENV);
+  assert.ok(invalid.errors.some((e) => e.includes("invalid --stall-timeout-ms")));
+});
+
+test("parseRunConfig: 委託 run は無進捗・絶対どちらの期限も持たない", () => {
+  const { config, errors } = parseRunConfig([], {
+    CONCORDIA_DELEGATION_PROMPT_FILE: THIS_FILE,
+    CONCORDIA_DELEGATION_RUN_ID: "run-no-timeout",
+  } as NodeJS.ProcessEnv);
+  assert.deepEqual(errors, []);
+  assert.equal(config.stallTimeoutMs, null);
+  assert.equal(config.turnTimeoutMs, null);
+});
+
+test("parseRunConfig: 委託 run への明示タイムアウト指定は拒否する", () => {
+  const { errors } = parseRunConfig(["--turn-timeout-ms", "1000"], {
+    CONCORDIA_DELEGATION_PROMPT_FILE: THIS_FILE,
+    CONCORDIA_DELEGATION_RUN_ID: "run-explicit-timeout",
+  } as NodeJS.ProcessEnv);
+  assert.ok(errors.some((e) => e.includes("TaskWorkflow runs do not accept turn timeouts")));
+});
+
+test("parseRunConfig: one-shot は無進捗上限を持たない (絶対上限のみ)", () => {
+  const { config } = parseRunConfig(["--prompt", "do it"], BARE_ENV);
+  assert.equal(config.stallTimeoutMs, null);
 });

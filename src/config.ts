@@ -18,7 +18,10 @@ export interface SatellesRunConfig {
   networkAccess: boolean;
   skillsDir: string | null;
   memory: boolean;
-  turnTimeoutMs: number | undefined;
+  /** 絶対上限。null は無効 (委託 run の期限は TaskWorkflow が持つ)。 */
+  turnTimeoutMs: number | null | undefined;
+  /** 無進捗の上限。null は無効 (委託 run)。 */
+  stallTimeoutMs: number | null;
   delegationRunId: string | null;
   spawnEnrollment: string | null;
 }
@@ -29,6 +32,17 @@ export interface ParseCliResult {
 }
 
 const VALID_EFFORT = new Set(["minimal", "low", "medium", "high", "xhigh", "ultra"]);
+
+/**
+ * 無進捗上限の上限値。根拠は対話セッション — 人間が Discord の前で待つ
+ * 時間なので、これ以上は引き伸ばせない。
+ *
+ * なお `--stall-timeout-ms` の検証はモードを問わずこの上限で行う
+ * (one-shot でも 5 分超は受け付けない)。one-shot / 委託 run の既定は
+ * 「無進捗上限なし」で、長時間の無音が正当な用途はそちらを使う。
+ */
+export const MAX_INTERACTIVE_STALL_TIMEOUT_MS = 5 * 60 * 1_000;
+export const DEFAULT_INTERACTIVE_STALL_TIMEOUT_MS = MAX_INTERACTIVE_STALL_TIMEOUT_MS;
 
 /**
  * CLI 引数 + env から実行設定を組み立てる。
@@ -51,7 +65,8 @@ export function parseRunConfig(
   let networkAccess = false;
   let skillsDir: string | null = env.SATELLES_SKILLS_DIR?.trim() || null;
   let memory = env.SATELLES_MEMORY !== "0";
-  let turnTimeoutMs: number | undefined;
+  let requestedTurnTimeoutMs: number | undefined;
+  let requestedStallTimeoutMs: number | undefined;
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
@@ -117,7 +132,21 @@ export function parseRunConfig(
         if (v !== null) {
           const n = Number(v);
           if (!Number.isInteger(n) || n <= 0) errors.push(`invalid --turn-timeout-ms: ${v}`);
-          else turnTimeoutMs = n;
+          else requestedTurnTimeoutMs = n;
+        }
+        break;
+      }
+      case "--stall-timeout-ms": {
+        const v = next();
+        if (v !== null) {
+          const n = Number(v);
+          if (!Number.isInteger(n) || n <= 0 || n > MAX_INTERACTIVE_STALL_TIMEOUT_MS) {
+            errors.push(
+              `invalid --stall-timeout-ms: ${v} (must be 1-${MAX_INTERACTIVE_STALL_TIMEOUT_MS})`,
+            );
+          } else {
+            requestedStallTimeoutMs = n;
+          }
         }
         break;
       }
@@ -147,6 +176,21 @@ export function parseRunConfig(
     errors.push("one-shot mode requires --prompt-file / --prompt (or CONCORDIA_DELEGATION_PROMPT_FILE)");
   }
 
+  // 期限のポリシー。対話は人間が待つので短い無進捗上限を既定で持ち、委託 run は
+  // 長時間処理そのものが仕事なので Satelles 側の期限を一切かけない (期限は
+  // TaskWorkflow が持つ)。one-shot は絶対上限のみ。
+  const delegationRunId = env.CONCORDIA_DELEGATION_RUN_ID?.trim() || null;
+  let turnTimeoutMs: number | null | undefined = requestedTurnTimeoutMs;
+  let stallTimeoutMs: number | null =
+    requestedStallTimeoutMs ?? (interactive ? DEFAULT_INTERACTIVE_STALL_TIMEOUT_MS : null);
+  if (delegationRunId) {
+    if (requestedTurnTimeoutMs !== undefined || requestedStallTimeoutMs !== undefined) {
+      errors.push("TaskWorkflow runs do not accept turn timeouts");
+    }
+    turnTimeoutMs = null;
+    stallTimeoutMs = null;
+  }
+
   const config: SatellesRunConfig = {
     sessionId: sessionId ?? env.SATELLES_SESSION_ID?.trim() ?? `satelles-${randomUUID()}`,
     provider: "codex-sdk",
@@ -161,7 +205,8 @@ export function parseRunConfig(
     skillsDir,
     memory,
     turnTimeoutMs,
-    delegationRunId: env.CONCORDIA_DELEGATION_RUN_ID?.trim() || null,
+    stallTimeoutMs,
+    delegationRunId,
     spawnEnrollment: env.CONCORDIA_SPAWN_ID?.trim() || null,
   };
   return { config, errors };
