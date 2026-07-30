@@ -81,6 +81,27 @@ export class ConcordiaClient {
     }
   }
 
+  /**
+   * 委託 run の終了報告 (`POST /v1/delegation/runs/:id/status`)。
+   * Cc はこれでスロット解放・親セッション通知・effort 学習を行う。
+   * best-effort — 報告失敗でランナーの exit code は変えない。
+   */
+  async postDelegationRunStatus(
+    runId: string,
+    payload: { status: "running" | "completed" | "failed"; detail?: string; result?: string },
+  ): Promise<boolean> {
+    try {
+      await this.fetchJson(
+        "POST",
+        `/v1/delegation/runs/${encodeURIComponent(runId)}/status`,
+        payload,
+      );
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   openLiveness(
     id: string,
     enrollment: string | null,
