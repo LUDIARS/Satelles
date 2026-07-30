@@ -11,6 +11,7 @@
  */
 
 import { parseAskMarkerText } from "./ask-marker.js";
+import { buildCodexChildEnv } from "./child-env.js";
 import { SatellesCodexSession } from "./codex-session.js";
 import { buildConfigOverrides, type SatellesRunConfig } from "./config.js";
 import {
@@ -117,7 +118,7 @@ export async function runSatelles(config: SatellesRunConfig, deps?: RunnerDeps):
   const session = await SatellesCodexSession.start({
     binary: config.codexBinary,
     cwd: config.cwd,
-    env: process.env,
+    env: buildCodexChildEnv(process.env),
     sink,
     clientVersion: SATELLES_VERSION,
     configOverrides: buildConfigOverrides(config),
