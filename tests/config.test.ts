@@ -68,11 +68,22 @@ test("parseRunConfig: 未知引数はエラー", () => {
   assert.ok(errors.some((e) => e.includes("unknown argument")));
 });
 
-test("buildConfigOverrides: model / effort を codex -c 形式へ", () => {
+test("buildConfigOverrides: model / effort を codex -c 形式へ (引用符なしの raw literal)", () => {
   assert.deepEqual(buildConfigOverrides({ model: null, effort: null }), []);
+  // 引用符を付けると Windows cmd 経路の unsafe 文字チェックに落ちる (2026-07-30 実害)。
   assert.deepEqual(
     buildConfigOverrides({ model: "gpt-5.6-sol", effort: "xhigh" }),
-    ['model="gpt-5.6-sol"', 'model_reasoning_effort="xhigh"'],
+    ["model=gpt-5.6-sol", "model_reasoning_effort=xhigh"],
+  );
+});
+
+test("buildConfigOverrides: 公開 API 直呼びでも不正値は `-c` へ渡さない", () => {
+  // parseRunConfig を経由しない呼び出し (index.ts の公開 export) でも
+  // 引用符なし raw literal の前提を破らせない。
+  assert.throws(() => buildConfigOverrides({ model: 'bad"model', effort: null }), /unsafe model id/);
+  assert.throws(
+    () => buildConfigOverrides({ model: null, effort: "hyper" }),
+    /unsafe reasoning effort/,
   );
 });
 
@@ -115,4 +126,39 @@ test("parseRunConfig: 委託 run への明示タイムアウト指定は拒否�
 test("parseRunConfig: one-shot は無進捗上限を持たない (絶対上限のみ)", () => {
   const { config } = parseRunConfig(["--prompt", "do it"], BARE_ENV);
   assert.equal(config.stallTimeoutMs, null);
+});
+
+test("parseRunConfig: 不正文字を含む --model はエラー", () => {
+  const { errors } = parseRunConfig(["--prompt", "x", "--model", 'bad"model'], BARE_ENV);
+  assert.ok(errors.some((e) => e.includes("invalid --model")));
+});
+
+test("parseRunConfig: env 経路の不正値も CLI エラーにする (runner 内 throw にしない)", () => {
+  // 素通しすると buildConfigOverrides が runner の途中で throw し、
+  // ユーザに stack trace が出る。
+  const bad = parseRunConfig(["--prompt", "x"], {
+    SATELLES_MODEL: 'bad"model',
+    SATELLES_EFFORT: "hyper",
+  } as NodeJS.ProcessEnv);
+  assert.ok(bad.errors.some((e) => e.includes("invalid SATELLES_MODEL")));
+  assert.ok(bad.errors.some((e) => e.includes("invalid SATELLES_EFFORT")));
+  assert.equal(bad.config.model, null);
+  assert.equal(bad.config.effort, null);
+
+  const ok = parseRunConfig(["--prompt", "x"], {
+    SATELLES_MODEL: "gpt-5.6-sol",
+    SATELLES_EFFORT: "high",
+  } as NodeJS.ProcessEnv);
+  assert.deepEqual(ok.errors, []);
+  assert.deepEqual(buildConfigOverrides(ok.config), [
+    "model=gpt-5.6-sol",
+    "model_reasoning_effort=high",
+  ]);
+
+  // CLI 指定は env より優先される (検証は CLI 値に対して行う)。
+  const cliWins = parseRunConfig(["--prompt", "x", "--model", "gpt-5.6-pro"], {
+    SATELLES_MODEL: 'bad"model',
+  } as NodeJS.ProcessEnv);
+  assert.deepEqual(cliWins.errors, []);
+  assert.equal(cliWins.config.model, "gpt-5.6-pro");
 });

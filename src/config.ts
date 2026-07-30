@@ -32,6 +32,8 @@ export interface ParseCliResult {
 }
 
 const VALID_EFFORT = new Set(["minimal", "low", "medium", "high", "xhigh", "ultra"]);
+/** codex model id に許す安全文字集合 (`-c model=` へ生値で渡すため)。 */
+const MODEL_ID_RE = /^[A-Za-z0-9._:\/-]+$/;
 
 /**
  * 無進捗上限の上限値。根拠は対話セッション — 人間が Discord の前で待つ
@@ -86,7 +88,11 @@ export function parseRunConfig(
         break;
       }
       case "--model": {
-        model = next();
+        const v = next();
+        if (v !== null) {
+          if (!MODEL_ID_RE.test(v)) errors.push(`invalid --model: ${v}`);
+          else model = v;
+        }
         break;
       }
       case "--effort": {
@@ -191,14 +197,33 @@ export function parseRunConfig(
     stallTimeoutMs = null;
   }
 
+  // env 経路も CLI と同じ検証をかける。ここを素通しすると buildConfigOverrides が
+  // runner の途中で throw し、ユーザに stack trace が出る (CLI エラーで落ちない)。
+  let resolvedModel = model;
+  if (resolvedModel === null) {
+    const v = env.SATELLES_MODEL?.trim() || null;
+    if (v !== null) {
+      if (!MODEL_ID_RE.test(v)) errors.push(`invalid SATELLES_MODEL: ${v}`);
+      else resolvedModel = v;
+    }
+  }
+  let resolvedEffort = effort;
+  if (resolvedEffort === null) {
+    const v = env.SATELLES_EFFORT?.trim() || null;
+    if (v !== null) {
+      if (!VALID_EFFORT.has(v)) errors.push(`invalid SATELLES_EFFORT: ${v}`);
+      else resolvedEffort = v;
+    }
+  }
+
   const config: SatellesRunConfig = {
     sessionId: sessionId ?? env.SATELLES_SESSION_ID?.trim() ?? `satelles-${randomUUID()}`,
     provider: "codex-sdk",
     cwd,
     host: hostname(),
     codexBinary: env.SATELLES_CODEX_BINARY?.trim() || "codex",
-    model: model ?? env.SATELLES_MODEL?.trim() ?? null,
-    effort: effort ?? env.SATELLES_EFFORT?.trim() ?? null,
+    model: resolvedModel,
+    effort: resolvedEffort,
     taskPrompt,
     interactive,
     networkAccess,
@@ -212,10 +237,25 @@ export function parseRunConfig(
   return { config, errors };
 }
 
-/** model / effort を `codex -c` override 文字列列へ変換する。 */
+/**
+ * model / effort を `codex -c` override 文字列列へ変換する。
+ *
+ * 値は引用符を付けず生で渡す。codex の `-c` は TOML パース失敗時に raw 文字列
+ * literal として扱うため引用符は不要で、引用符を付けると Windows cmd 経路の
+ * unsafe 文字チェック (`"` 拒否) に自爆する (2026-07-30 実害: spawn 即死)。
+ * 値の安全性は parseRunConfig が CLI / env 両経路の解決後の値に対して担保するが、
+ * この関数は公開 API (index.ts) でもあるため、同じ条件をここでも再確認する
+ * (model=MODEL_ID_RE / effort=VALID_EFFORT)。
+ */
 export function buildConfigOverrides(config: Pick<SatellesRunConfig, "model" | "effort">): string[] {
   const overrides: string[] = [];
-  if (config.model) overrides.push(`model=${JSON.stringify(config.model)}`);
-  if (config.effort) overrides.push(`model_reasoning_effort=${JSON.stringify(config.effort)}`);
+  if (config.model) {
+    if (!MODEL_ID_RE.test(config.model)) throw new Error(`unsafe model id: ${config.model}`);
+    overrides.push(`model=${config.model}`);
+  }
+  if (config.effort) {
+    if (!VALID_EFFORT.has(config.effort)) throw new Error(`unsafe reasoning effort: ${config.effort}`);
+    overrides.push(`model_reasoning_effort=${config.effort}`);
+  }
   return overrides;
 }
