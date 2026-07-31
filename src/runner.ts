@@ -11,6 +11,7 @@
  */
 
 import { parseAskMarkerText } from "./ask-marker.js";
+import { isHumanInject } from "./inject-origin.js";
 import { buildCodexChildEnv } from "./child-env.js";
 import { CodexTurnError, SatellesCodexSession } from "./codex-session.js";
 import { buildConfigOverrides, type SatellesRunConfig } from "./config.js";
@@ -35,6 +36,8 @@ interface IncomingInput {
   kind: "inject" | "answer";
   text: string;
   questionId: number | null;
+  /** Concordia の session.inject source。人間 / 自動の判別に使う (answer は null)。 */
+  source: string | null;
 }
 
 /**
@@ -62,6 +65,15 @@ class InputQueue {
     return new Promise((resolve) => {
       this.waiter = resolve;
     });
+  }
+
+  /**
+   * 取り出したが今は消費できない入力を、到着順のまま先頭へ戻す。
+   * ask の回答待ち中に届いた自動 inject を、後続ターンの入力として残すのに使う。
+   */
+  restore(inputs: readonly IncomingInput[]): void {
+    if (inputs.length === 0) return;
+    this.queue.unshift(...inputs);
   }
 }
 
@@ -229,7 +241,7 @@ export async function runSatelles(config: SatellesRunConfig, deps?: RunnerDeps):
           break;
         }
         log(`ask marker relayed (question_id=${questionId ?? "n/a"}); waiting for answer`);
-        const answer = await waitForAnswer(inputs, questionId);
+        const answer = await waitForAnswer(inputs, questionId, log);
         nextInput = answer;
         continue;
       }
@@ -353,11 +365,36 @@ async function clearStallNotice(
  * 生テキスト inject は無条件で回答として扱う (Lictor の三分岐と同じ寛容さ)。
  * 不一致の answer は捨てて待ち続ける。
  */
-async function waitForAnswer(inputs: InputQueue, questionId: number | null): Promise<string> {
+export async function waitForAnswer(
+  inputs: InputQueue,
+  questionId: number | null,
+  log?: (message: string) => void,
+): Promise<string> {
+  // 回答待ち中に届いた自動 inject。到着順のままキューへ戻し、次ターンの
+  // 通常入力として使う (捨てると Cc の指示が丸ごと消える)。
+  const deferred: IncomingInput[] = [];
+  const restore = (): void => {
+    inputs.restore(deferred);
+    deferred.length = 0;
+  };
   for (;;) {
     const input = await inputs.take();
-    if (input.kind === "inject") return input.text;
-    if (questionId === null || input.questionId === questionId) return input.text;
+    if (input.kind === "answer") {
+      // question_id 不一致の answer は他の質問の答え。従来どおり捨てる。
+      if (questionId === null || input.questionId === questionId) {
+        restore();
+        return input.text;
+      }
+      continue;
+    }
+    if (isHumanInject(input.source)) {
+      restore();
+      return input.text;
+    }
+    // 自動注入は回答ではない。ここで消費すると人間の答えを待たずに進む
+    // (2026-07-30 Delegation Test の実害)。
+    log?.(`ignoring automated inject while waiting for an answer (source=${input.source ?? "none"})`);
+    deferred.push(input);
   }
 }
 
@@ -368,7 +405,12 @@ export function handleWsEvent(msg: unknown, ownSessionId: string, inputs: InputQ
   if (ev.type === "session.inject") {
     if (ev.target_session_id !== ownSessionId) return;
     if (typeof ev.text !== "string" || ev.text.length === 0) return;
-    inputs.push({ kind: "inject", text: ev.text, questionId: null });
+    inputs.push({
+      kind: "inject",
+      text: ev.text,
+      questionId: null,
+      source: typeof ev.source === "string" ? ev.source : null,
+    });
     return;
   }
   if (ev.type === "question.answered") {
@@ -376,7 +418,7 @@ export function handleWsEvent(msg: unknown, ownSessionId: string, inputs: InputQ
     if (typeof ev.question_id !== "number" || !Number.isInteger(ev.question_id)) return;
     const text = typeof ev.answer_text === "string" ? ev.answer_text : "";
     if (!text) return;
-    inputs.push({ kind: "answer", text, questionId: ev.question_id });
+    inputs.push({ kind: "answer", text, questionId: ev.question_id, source: null });
   }
 }
 
