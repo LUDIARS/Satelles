@@ -2,7 +2,7 @@
 task: usage-cost-frames
 project: Satelles
 kind: 実装
-status: pending
+status: partial
 created: 2026-07-30T09:00:00.000Z
 source_session: lictor-747d1505-b6bf-4c9e-a545-cdd83526e330
 memoria_task_id: 665

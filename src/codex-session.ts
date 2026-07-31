@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
   CodexAppServerClient,
+  type CodexRpcNotification,
   type CodexServerRequestHandler,
   type SpawnCodexAppServerOptions,
 } from "./codex-app-server-client.js";
@@ -9,6 +10,7 @@ import {
   notificationThreadId,
   notificationTurnId,
   parseTurnCompletion,
+  parseTurnUsage,
 } from "./codex-event-frames.js";
 import {
   bootstrapCodexSession,
@@ -214,6 +216,30 @@ export class SatellesCodexSession {
     }
   }
 
+  /**
+   * turn/completed の usage を集計用 raw frame として積む。usage が読めない
+   * turn は黙って何もしない。
+   *
+   * 送信の reject はここで握り潰すが、恒久失敗した sink はそれ自体が
+   * poison される設計なので、後続の flush が turn を失敗させることはある。
+   * 「usage の送信だけが静かに欠ける」保証ではない。
+   */
+  private postTurnUsage(notification: CodexRpcNotification): void {
+    const usage = parseTurnUsage(notification, this.identity.threadId);
+    if (!usage) return;
+    void this.sink.post("raw", {
+      type: "codex_usage",
+      thread_id: usage.threadId,
+      turn_id: usage.turnId,
+      input_tokens: usage.inputTokens ?? null,
+      cached_input_tokens: usage.cachedInputTokens ?? null,
+      cache_write_input_tokens: usage.cacheWriteInputTokens ?? null,
+      output_tokens: usage.outputTokens ?? null,
+      reasoning_output_tokens: usage.reasoningOutputTokens ?? null,
+      total_tokens: usage.totalTokens ?? null,
+    }).catch(() => undefined);
+  }
+
   private async runTurnInner(options: RunTurnOptions): Promise<TurnResult> {
     let activeTurnId: string | null = null;
     let settled = false;
@@ -268,6 +294,9 @@ export class SatellesCodexSession {
         // 一切数えない。ウォッチドッグの延長にも使わない。
         const zombie = this.mapper.map(notification);
         if (zombie) void this.sink.post(zombie.kind, zombie.payload).catch(() => undefined);
+        // 打ち切った turn もトークンは実際に焼いている。frame 自体が turn_id を
+        // 持つので、現ターンに数えずに集計面へだけ出す。
+        this.postTurnUsage(notification);
         // その turn が完了したなら、もう後追いイベントは来ない。長寿命の
         // interactive セッションで停滞が繰り返されても id が溜まり続けない
         // よう、ここで持ち主を忘れる。
@@ -320,6 +349,10 @@ export class SatellesCodexSession {
       // ウォッチドッグを止める。
       terminalReceived = true;
       stallTimer.stop();
+      // usage は Cc のコスト集計の一次ソース。rollout tail を持たない
+      // codex-sdk セッションは、この frame を出さないと集計対象にならない。
+      // turn/completed frame より後に積むので、下の flush が配送まで見る。
+      this.postTurnUsage(notification);
       void framePost
         .then(() => this.sink.flush())
         .then(() => {

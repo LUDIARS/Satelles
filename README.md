@@ -31,6 +31,9 @@ API キーのどちらでもそのまま使える (`account/read` 経由で検�
 - **Delegation target**: `CONCORDIA_DELEGATION_PROMPT_FILE` /
   `CONCORDIA_DELEGATION_RUN_ID` を Lictor と同じ契約で受ける。Cc 側は
   wt.exe spawn の代わりに `satelles run` をヘッドレス起動するだけでよい。
+- **コスト集計への usage 供給**: turn/completed の usage を `codex_usage` raw frame として
+  Concordia へ流す。rollout JSONL を読まない codex-sdk セッションでも、Cc 側が
+  トークン内訳 (cached_input 含む) を一次ソースから集計できる。
 - **Discord リレー**: 全イベントを Concordia `transcript-frame` へ順序保証 POST
   (Lictor と同じ OrderedTranscriptSink)。egress 側は既存のまま。
 - **停滞ターンの打ち切り**: ターンのイベントが `--stall-timeout-ms` 途絶えたら

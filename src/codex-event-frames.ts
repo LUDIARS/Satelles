@@ -9,7 +9,13 @@ const ParamsSchema = z.object({
     id: z.string(),
     status: z.string().optional(),
     error: z.unknown().optional(),
+    // usage の形は app-server の実装差で揺れる (null / 別の入れ子)。ここで
+    // 形を宣言すると、揺れが ParamsSchema 全体の parse 失敗になり、
+    // turn/completed の検出まで巻き添えで死ぬ (turn が停滞扱いで終わる)。
+    // 中身の取り出しは parseTurnUsage 側で個別に型を見る。
+    usage: z.unknown().optional(),
   }).passthrough().optional(),
+  usage: z.unknown().optional(),
   item: z.object({
     id: z.string(),
     type: z.string(),
@@ -63,6 +69,78 @@ export class CodexEventFrameMapper {
     this.seen.add(mapped.dedupKey);
     return mapped;
   }
+}
+
+export interface CodexTurnUsage {
+  threadId: string;
+  turnId: string;
+  inputTokens?: number;
+  cachedInputTokens?: number;
+  cacheWriteInputTokens?: number;
+  outputTokens?: number;
+  reasoningOutputTokens?: number;
+  totalTokens?: number;
+}
+
+type CodexTurnUsageTokenField = Exclude<keyof CodexTurnUsage, "threadId" | "turnId">;
+
+/**
+ * 出力キーと、それを供給しうる実測キー。実測の語彙は snake_case
+ * (`input_tokens` / `cached_input_tokens` / …) だが、camelCase を返す実装差に
+ * 当たっても落とさないよう両方見る。
+ */
+const USAGE_TOKEN_FIELDS: Array<readonly [CodexTurnUsageTokenField, string, string]> = [
+  ["inputTokens", "input_tokens", "inputTokens"],
+  ["cachedInputTokens", "cached_input_tokens", "cachedInputTokens"],
+  ["cacheWriteInputTokens", "cache_write_input_tokens", "cacheWriteInputTokens"],
+  ["outputTokens", "output_tokens", "outputTokens"],
+  ["reasoningOutputTokens", "reasoning_output_tokens", "reasoningOutputTokens"],
+  ["totalTokens", "total_tokens", "totalTokens"],
+];
+
+/** 有限な数値だけ採る。NaN / Infinity はコストの一次ソースとして無意味。 */
+function pickTokenCount(source: Record<string, unknown>, ...keys: string[]): number | undefined {
+  for (const key of keys) {
+    const value = source[key];
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+  }
+  return undefined;
+}
+
+/**
+ * turn/completed の usage を取り出す。
+ *
+ * Concordia のコスト集計は codex-cli を rollout JSONL の後追いで拾うが、
+ * codex-sdk セッションは走査対象外 (rollout tail を持たないのが Satelles の
+ * 存在意義)。そこで app-server が turn ごとに返す usage を一次ソースとして
+ * transcript frame に載せ、Cc がそこから集計できるようにする。
+ * usage が無い / 読めない turn は無害にスキップする (null)。欠けた項目は
+ * 「取れなかった」として出さない (0 と区別する — 0 は「キャッシュが
+ * 効かなかった」の実測値)。
+ */
+export function parseTurnUsage(
+  notification: CodexRpcNotification,
+  expectedThreadId: string,
+): CodexTurnUsage | null {
+  if (notification.method !== "turn/completed") return null;
+  const parsed = ParamsSchema.safeParse(notification.params);
+  if (!parsed.success || parsed.data.threadId !== expectedThreadId || !parsed.data.turn) return null;
+  const raw = parsed.data.turn.usage ?? parsed.data.usage;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const usage = raw as Record<string, unknown>;
+  const fields: CodexTurnUsage = {
+    threadId: expectedThreadId,
+    turnId: parsed.data.turn.id,
+  };
+  let found = 0;
+  for (const [target, snakeKey, camelKey] of USAGE_TOKEN_FIELDS) {
+    const value = pickTokenCount(usage, snakeKey, camelKey);
+    if (value === undefined) continue;
+    fields[target] = value;
+    found++;
+  }
+  // トークンが 1 つも読めなければ、載せる中身が無い。
+  return found > 0 ? fields : null;
 }
 
 export function parseTurnCompletion(
