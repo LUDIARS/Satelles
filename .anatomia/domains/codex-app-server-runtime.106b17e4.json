@@ -1,0 +1,23 @@
+{
+  "name": "codex-app-server-runtime",
+  "description": "Spawning and speaking JSON-RPC to the codex app-server child process — the sole child Satelles owns. Covers native (cmd.exe / direct) and WSL (bash -lc) spawn paths, argv assembly, and the JSON-RPC-over-stdio client.",
+  "role": "semantic",
+  "presetRules": [
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "/src/codex-app-server-client.ts$",
+        "by": "path",
+        "maxFanOut": 9007199254740991
+      }
+    }
+  ],
+  "templateRules": [],
+  "cardTemplate": "Summarise the codex-app-server-runtime domain: process model, spawn-path branching, JSON-RPC client.",
+  "source": "manual",
+  "specRefs": [
+    "Satelles design / process model",
+    "WSL codex spawn switch (SATELLES_CODEX_RUNTIME=wsl) / spawn path branching"
+  ],
+  "rationale": "Owning exactly one codex child and talking JSON-RPC JSONL to it; native/wsl spawn branching and pure argv assembly live here per spec."
+}

@@ -1,0 +1,22 @@
+{
+  "name": "child-process-env",
+  "description": "Non-interactive child env construction (GIT_TERMINAL_PROMPT, GIT_ASKPASS, GIT_SSH_COMMAND, etc.) and its propagation into the WSL bash -lc export prelude.",
+  "role": "semantic",
+  "presetRules": [
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "/src/child-env.ts$",
+        "by": "path",
+        "maxFanOut": 9007199254740991
+      }
+    }
+  ],
+  "templateRules": [],
+  "cardTemplate": "Summarise the child-process-env domain: non-interactive child env and WSL export prelude.",
+  "source": "manual",
+  "specRefs": [
+    "WSL codex spawn switch (SATELLES_CODEX_RUNTIME=wsl) / env propagation"
+  ],
+  "rationale": "The NON_INTERACTIVE_ENV key set consumed by both native spawn and the WSL export prelude is a small shared concern with its own test."
+}

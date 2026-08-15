@@ -1,5 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { z } from "zod";
+import { NON_INTERACTIVE_ENV } from "./child-env.js";
+import { windowsPathToWslPath } from "./wsl-path.js";
 
 const RpcIdSchema = z.union([z.number().int(), z.string()]);
 const RpcErrorSchema = z.object({
@@ -76,6 +78,14 @@ export interface SpawnCodexAppServerOptions extends CodexAppServerClientOptions 
    * OPTIONS として渡す。
    */
   configOverrides?: string[];
+  /** `"native"` (既定, Windows/POSIX 直起動) か `"wsl"` (WSL 内 Linux codex)。 */
+  runtime?: "native" | "wsl";
+  /** runtime="wsl" のときの `wsl.exe -d <distro>`。 */
+  wslDistro?: string;
+  /** runtime="wsl" のときの `wsl.exe -u <user>`。 */
+  wslUser?: string;
+  /** runtime="wsl" のとき WSL 内で解決する codex コマンド名 (既定 "codex")。 */
+  wslCodexBinary?: string;
   spawnProcess?: () => ChildProcessWithoutNullStreams;
 }
 
@@ -376,6 +386,9 @@ export class CodexAppServerClient {
 }
 
 function spawnCodexAppServer(options: SpawnCodexAppServerOptions): ChildProcessWithoutNullStreams {
+  if (options.runtime === "wsl") {
+    return spawnCodexAppServerViaWsl(options);
+  }
   const overrides = (options.configOverrides ?? []).flatMap((kv) => ["-c", kv]);
   const args = ["app-server", ...overrides, "--listen", "stdio://"];
   if (process.platform !== "win32") {
@@ -406,6 +419,67 @@ function spawnCodexAppServer(options: SpawnCodexAppServerOptions): ChildProcessW
     stdio: "pipe",
     windowsHide: true,
   });
+}
+
+/**
+ * `wsl.exe` 経由で WSL 内 Linux 版 codex の app-server を起動する。
+ *
+ * Windows lsass ログオンセッションリーク (Windows 版 codex.exe の
+ * `CreateProcessWithLogonW` → `CodexSandboxOffline`、upstream #33356/#35940
+ * 未修正) を、この機構を持たない Linux 版 codex への差替えで回避する
+ * (spec/plan/2026-08-15-wsl-codex-runtime.md)。
+ */
+function spawnCodexAppServerViaWsl(options: SpawnCodexAppServerOptions): ChildProcessWithoutNullStreams {
+  const args = buildWslSpawnArgs(options);
+  return spawn("wsl.exe", args, {
+    cwd: options.cwd,
+    env: options.env,
+    stdio: "pipe",
+    windowsHide: true,
+  });
+}
+
+/** POSIX シェルのシングルクォート引用 (`'` を `'\''` へエスケープ)。 */
+function posixShellQuote(value: string): string {
+  if (/[\0\r\n]/u.test(value)) {
+    throw new CodexAppServerError(
+      "codex_app_server_start_failed",
+      "unsafe control character in value passed to WSL shell",
+    );
+  }
+  return `'${value.replace(/'/gu, "'\\''")}'`;
+}
+
+/**
+ * `wsl.exe` の argv を組み立てる純関数 (`wsl.exe` は起動しない、テスト用に export)。
+ *
+ * `options.cwd` (絶対 Windows パス) を `windowsPathToWslPath()` で WSL パスへ
+ * 変換し、`bash -lc` 内で `cd` する。`buildCodexChildEnv()` の非対話設定
+ * ({@link NON_INTERACTIVE_ENV} のキー) のみを `export` として明示注入する
+ * (WSL は既定でホスト env を子へ渡さない上、`WSLENV` はエスケープ規則が弱いため
+ * 使わない)。
+ */
+export function buildWslSpawnArgs(options: SpawnCodexAppServerOptions): string[] {
+  const distro = options.wslDistro?.trim() || "Ubuntu";
+  const user = options.wslUser?.trim() || "ubuntu";
+  const codexBin = options.wslCodexBinary?.trim() || "codex";
+  const wslCwd = windowsPathToWslPath(options.cwd);
+
+  const overrides = (options.configOverrides ?? []).flatMap((kv) => ["-c", kv]);
+  const codexArgs = ["app-server", ...overrides, "--listen", "stdio://"];
+
+  const exportStatements = Object.keys(NON_INTERACTIVE_ENV)
+    .filter((key) => options.env[key] !== undefined)
+    .map((key) => `export ${key}=${posixShellQuote(String(options.env[key]))};`);
+
+  const command = [
+    ...exportStatements,
+    `cd ${posixShellQuote(wslCwd)} &&`,
+    posixShellQuote(codexBin),
+    ...codexArgs.map(posixShellQuote),
+  ].join(" ");
+
+  return ["-d", distro, "-u", user, "--", "bash", "-lc", command];
 }
 
 function defaultServerRequestHandler(request: CodexRpcServerRequest): unknown {

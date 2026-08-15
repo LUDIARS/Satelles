@@ -1,0 +1,22 @@
+{
+  "name": "wsl-path-conversion",
+  "description": "Pure Windows->WSL path conversion (E:\\... -> /mnt/e/...) used for the bash cd and every JSON-RPC cwd/writable root parameter; rejects UNC / relative / already-POSIX inputs.",
+  "role": "semantic",
+  "presetRules": [
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "/src/wsl-path.ts$",
+        "by": "path",
+        "maxFanOut": 9007199254740991
+      }
+    }
+  ],
+  "templateRules": [],
+  "cardTemplate": "Summarise the wsl-path-conversion domain: pure Windows->WSL path conversion for process and JSON-RPC workspace paths.",
+  "source": "manual",
+  "specRefs": [
+    "WSL codex spawn switch (SATELLES_CODEX_RUNTIME=wsl) / cwd conversion (src/wsl-path.ts)"
+  ],
+  "rationale": "A deliberately isolated side-effect-free pure function called for process cwd and JSON-RPC cwd; a standalone domain."
+}

@@ -18,6 +18,7 @@ import {
 } from "./codex-bootstrap.js";
 import type { TranscriptFrameSink } from "./transcript-sink.js";
 import { TurnStallTimer, type TurnStallTimerScheduler } from "./turn-stall-timer.js";
+import { codexRuntimeCwd } from "./wsl-path.js";
 
 const TurnStartResponseSchema = z.object({
   turn: z.object({
@@ -62,6 +63,11 @@ export interface StartSatellesCodexSessionOptions {
   clientVersion: string;
   /** `codex -c key=value` overrides (model=..., model_reasoning_effort=...). */
   configOverrides?: string[];
+  /** `"native"` (既定) か `"wsl"` (WSL 内 Linux codex への spawn 差替え)。 */
+  runtime?: "native" | "wsl";
+  wslDistro?: string;
+  wslUser?: string;
+  wslCodexBinary?: string;
   requestTimeoutMs?: number;
   onDiagnostic?: (message: string) => void;
   serverRequestHandler?: CodexServerRequestHandler;
@@ -143,6 +149,7 @@ export class SatellesCodexSession {
     public readonly sink: TranscriptFrameSink,
     public readonly identity: CodexSessionIdentity,
     private readonly mapper: CodexEventFrameMapper,
+    private readonly runtime: "native" | "wsl" | undefined,
   ) {}
 
   static async start(options: StartSatellesCodexSessionOptions): Promise<SatellesCodexSession> {
@@ -151,14 +158,20 @@ export class SatellesCodexSession {
       cwd: options.cwd,
       env: options.env,
       configOverrides: options.configOverrides,
+      runtime: options.runtime,
+      wslDistro: options.wslDistro,
+      wslUser: options.wslUser,
+      wslCodexBinary: options.wslCodexBinary,
       requestTimeoutMs: options.requestTimeoutMs,
       onDiagnostic: options.onDiagnostic,
       serverRequestHandler: options.serverRequestHandler,
       spawnProcess: options.spawnProcess,
     });
     try {
+      // WSL 内 codex には JSON-RPC `thread/start` の cwd も WSL パスで渡す。
+      const bootstrapCwd = codexRuntimeCwd(options.runtime, options.cwd);
       const identity = await bootstrapCodexSession(client, options.sink, {
-        cwd: options.cwd,
+        cwd: bootstrapCwd,
         clientVersion: options.clientVersion,
         approvalPolicy: "never",
         sandbox: "workspace-write",
@@ -168,6 +181,7 @@ export class SatellesCodexSession {
         options.sink,
         identity,
         new CodexEventFrameMapper(identity.threadId),
+        options.runtime,
       );
     } catch (error) {
       await client.close().catch(() => undefined);
@@ -251,6 +265,9 @@ export class SatellesCodexSession {
       resolveCompletion = resolve;
       rejectCompletion = reject;
     });
+    // `turn/start` は bootstrap とは別の JSON-RPC 呼び出しで cwd と
+    // writableRoots を評価する。WSL runtime では両方を Linux 側の形式にする。
+    const codexCwd = codexRuntimeCwd(this.runtime, options.cwd);
     // completionPromise は turn/start が返ってから初めて await される。その手前で
     // notification ハンドラや停滞タイマが reject すると、ハンドラ未装着のまま
     // unhandledRejection になり Satelles プロセスごと落ちる (turn/start 自体が
@@ -382,11 +399,11 @@ export class SatellesCodexSession {
         turnRaw = await this.client.request("turn/start", {
           threadId: this.identity.threadId,
           input: [{ type: "text", text: options.prompt }],
-          cwd: options.cwd,
+          cwd: codexCwd,
           approvalPolicy: "never",
           sandboxPolicy: {
             type: "workspaceWrite",
-            writableRoots: [options.cwd],
+            writableRoots: [codexCwd],
             networkAccess: options.networkAccess === true,
           },
         });

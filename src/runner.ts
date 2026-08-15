@@ -134,6 +134,10 @@ export async function runSatelles(config: SatellesRunConfig, deps?: RunnerDeps):
     sink,
     clientVersion: SATELLES_VERSION,
     configOverrides: buildConfigOverrides(config),
+    runtime: config.codexRuntime,
+    wslDistro: config.wslDistro,
+    wslUser: config.wslUser,
+    wslCodexBinary: config.wslCodexBinary,
     onDiagnostic: (message) => log(`codex app-server: ${message}`),
   });
   log(

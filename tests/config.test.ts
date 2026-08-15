@@ -133,6 +133,36 @@ test("parseRunConfig: 不正文字を含む --model はエラー", () => {
   assert.ok(errors.some((e) => e.includes("invalid --model")));
 });
 
+test("parseRunConfig: SATELLES_CODEX_RUNTIME 既定は native、WSL 補助 env も既定値を持つ", () => {
+  const { config, errors } = parseRunConfig(["--prompt", "x"], BARE_ENV);
+  assert.deepEqual(errors, []);
+  assert.equal(config.codexRuntime, "native");
+  assert.equal(config.wslDistro, "Ubuntu");
+  assert.equal(config.wslUser, "ubuntu");
+  assert.equal(config.wslCodexBinary, "codex");
+});
+
+test("parseRunConfig: SATELLES_CODEX_RUNTIME=wsl と WSL 補助 env を読む", () => {
+  const { config, errors } = parseRunConfig(["--prompt", "x"], {
+    SATELLES_CODEX_RUNTIME: "wsl",
+    SATELLES_WSL_DISTRO: "Debian",
+    SATELLES_WSL_USER: "coder",
+    SATELLES_WSL_CODEX_BINARY: "/home/coder/.local/bin/codex",
+  } as NodeJS.ProcessEnv);
+  assert.deepEqual(errors, []);
+  assert.equal(config.codexRuntime, "wsl");
+  assert.equal(config.wslDistro, "Debian");
+  assert.equal(config.wslUser, "coder");
+  assert.equal(config.wslCodexBinary, "/home/coder/.local/bin/codex");
+});
+
+test("parseRunConfig: 不正な SATELLES_CODEX_RUNTIME はエラー (runner 内 throw にしない)", () => {
+  const { errors } = parseRunConfig(["--prompt", "x"], {
+    SATELLES_CODEX_RUNTIME: "docker",
+  } as NodeJS.ProcessEnv);
+  assert.ok(errors.some((e) => e.includes("invalid SATELLES_CODEX_RUNTIME")));
+});
+
 test("parseRunConfig: env 経路の不正値も CLI エラーにする (runner 内 throw にしない)", () => {
   // 素通しすると buildConfigOverrides が runner の途中で throw し、
   // ユーザに stack trace が出る。

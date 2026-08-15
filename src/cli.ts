@@ -39,6 +39,14 @@ Env:
   SATELLES_MODEL / SATELLES_EFFORT  defaults for --model / --effort
   SATELLES_SKILLS_DIR               default for --skills-dir
   SATELLES_MEMORY=0                 default for --no-memory
+  SATELLES_CODEX_RUNTIME            native (default) | wsl — spawn codex inside
+                                     WSL instead of the Windows binary (avoids the
+                                     lsass logon-session leak in codex.exe's sandbox
+                                     launcher; requires \`codex login\` inside WSL)
+  SATELLES_WSL_DISTRO               WSL distro for runtime=wsl (default: Ubuntu)
+  SATELLES_WSL_USER                 WSL user for runtime=wsl (default: ubuntu)
+  SATELLES_WSL_CODEX_BINARY         codex command inside WSL (default: codex,
+                                     resolved via the WSL user's login shell PATH)
 `;
 
 export async function main(argv: string[]): Promise<number> {

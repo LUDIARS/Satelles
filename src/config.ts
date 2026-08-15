@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import { hostname } from "node:os";
 import { readFileSync } from "node:fs";
 
+export type CodexRuntime = "native" | "wsl";
+
 export interface SatellesRunConfig {
   /** Concordia session id (satelles-<uuid> / 委託時は env から引き継ぎ可)。 */
   sessionId: string;
@@ -9,6 +11,14 @@ export interface SatellesRunConfig {
   cwd: string;
   host: string;
   codexBinary: string;
+  /** codex 本体を Windows ネイティブ ("native") / WSL 内 Linux 版 ("wsl") のどちらで起動するか。 */
+  codexRuntime: CodexRuntime;
+  /** runtime="wsl" のときの `wsl.exe -d <distro>`。native では未使用。 */
+  wslDistro: string;
+  /** runtime="wsl" のときの `wsl.exe -u <user>`。native では未使用。 */
+  wslUser: string;
+  /** runtime="wsl" のとき WSL 内で解決する codex コマンド名。native では未使用。 */
+  wslCodexBinary: string;
   model: string | null;
   effort: string | null;
   /** ターン 0 のタスクプロンプト。interactive serve では null 可。 */
@@ -216,12 +226,24 @@ export function parseRunConfig(
     }
   }
 
+  const rawRuntime = env.SATELLES_CODEX_RUNTIME?.trim() || "native";
+  let codexRuntime: CodexRuntime = "native";
+  if (rawRuntime === "native" || rawRuntime === "wsl") {
+    codexRuntime = rawRuntime;
+  } else {
+    errors.push(`invalid SATELLES_CODEX_RUNTIME: ${rawRuntime} (must be native or wsl)`);
+  }
+
   const config: SatellesRunConfig = {
     sessionId: sessionId ?? env.SATELLES_SESSION_ID?.trim() ?? `satelles-${randomUUID()}`,
     provider: "codex-sdk",
     cwd,
     host: hostname(),
     codexBinary: env.SATELLES_CODEX_BINARY?.trim() || "codex",
+    codexRuntime,
+    wslDistro: env.SATELLES_WSL_DISTRO?.trim() || "Ubuntu",
+    wslUser: env.SATELLES_WSL_USER?.trim() || "ubuntu",
+    wslCodexBinary: env.SATELLES_WSL_CODEX_BINARY?.trim() || "codex",
     model: resolvedModel,
     effort: resolvedEffort,
     taskPrompt,
