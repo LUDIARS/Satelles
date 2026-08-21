@@ -460,8 +460,8 @@ function posixShellQuote(value: string): string {
  * 使わない)。
  */
 export function buildWslSpawnArgs(options: SpawnCodexAppServerOptions): string[] {
-  const distro = options.wslDistro?.trim() || "Ubuntu";
-  const user = options.wslUser?.trim() || "ubuntu";
+  const distro = wslOptionValue(options.wslDistro, "Ubuntu", "distro");
+  const user = wslOptionValue(options.wslUser, "ubuntu", "user");
   const codexBin = options.wslCodexBinary?.trim() || "codex";
   const wslCwd = windowsPathToWslPath(options.cwd);
 
@@ -480,6 +480,30 @@ export function buildWslSpawnArgs(options: SpawnCodexAppServerOptions): string[]
   ].join(" ");
 
   return ["-d", distro, "-u", user, "--", "bash", "-lc", command];
+}
+
+/**
+ * `wsl.exe` 自体へ渡すオプション値を検証する。
+ *
+ * 制御文字を弾くだけでは足りない: `-` 始まりの値は `wsl.exe` に位置引数では
+ * なく別オプションとして解釈されるため (`-u --exec` 等)、distro / user 名に
+ * 実際に現れうる文字だけの allowlist で受ける。
+ */
+function wslOptionValue(value: string | undefined, fallback: string, name: string): string {
+  const resolved = value?.trim() || fallback;
+  if (/[\0\r\n]/u.test(resolved)) {
+    throw new CodexAppServerError(
+      "codex_app_server_start_failed",
+      `unsafe control character in WSL ${name}`,
+    );
+  }
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/u.test(resolved)) {
+    throw new CodexAppServerError(
+      "codex_app_server_start_failed",
+      `unsafe value for WSL ${name}`,
+    );
+  }
+  return resolved;
 }
 
 function defaultServerRequestHandler(request: CodexRpcServerRequest): unknown {

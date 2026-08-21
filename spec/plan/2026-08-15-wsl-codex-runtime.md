@@ -1,7 +1,7 @@
 # WSL 版 codex への spawn 切替 (SATELLES_CODEX_RUNTIME=wsl)
 
 - Date: 2026-08-15
-- Status: 実装中
+- Status: 実装済み（WSL 実機確認待ち）
 - Area: Satelles codex spawn (`src/codex-app-server-client.ts` 他)
 
 ## 背景・目的
@@ -96,6 +96,16 @@ wsl.exe -d <distro> -u <user> -- bash -lc '<exported env>; cd <wslCwd> && <codex
 残す (native は変えない)。wsl 経路は「拒否」ではなく「引用でエスケープ」
 だが、`\0` / 改行だけは引用では安全にできないため native と同じく拒否する
 (コマンド文字列の途中に改行が入ると `bash -lc` の意味が壊れるため)。
+
+### `wsl.exe` 自身のオプション値 (`-d` / `-u`)
+
+`SATELLES_WSL_DISTRO` / `SATELLES_WSL_USER` は `bash -lc` の文字列内では
+なく `wsl.exe` の argv に直接載るため、シングルクォート引用は効かない。
+ここは引用ではなく **allowlist (`^[A-Za-z0-9][A-Za-z0-9._-]*$`) で拒否する**
+方式を採る (`wslOptionValue()`)。制御文字だけを弾くと、`-` 始まりの値が
+位置引数ではなく `wsl.exe` の別オプションとして解釈される option smuggling
+(`-u --exec ...` 等) を許してしまうため。実在する distro 名 (`Ubuntu-22.04`)
+と Linux ユーザ名はこの文字集合に収まる。
 
 ## cwd 変換 (`src/wsl-path.ts`)
 

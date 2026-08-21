@@ -107,3 +107,50 @@ test("buildWslSpawnArgs: wsl.exe を起動せず argv だけを組み立てる (
   assert.ok(Array.isArray(args));
   assert.ok(args.every((a) => typeof a === "string"));
 });
+
+test("buildWslSpawnArgs: wslDistro に制御文字が含まれるとエラー", () => {
+  assert.throws(
+    () => buildWslSpawnArgs({ ...BASE_OPTIONS, wslDistro: "Ubuntu\ninjected" }),
+    /unsafe control character in WSL distro/,
+  );
+});
+
+test("buildWslSpawnArgs: wslUser に制御文字が含まれるとエラー", () => {
+  assert.throws(
+    () => buildWslSpawnArgs({ ...BASE_OPTIONS, wslUser: "ubuntu\rinjected" }),
+    /unsafe control character in WSL user/,
+  );
+});
+
+test("buildWslSpawnArgs: `-` 始まりの distro/user は wsl.exe のオプションとして解釈されうるので拒否", () => {
+  // `-u --exec ...` のように、位置引数のつもりの値が wsl.exe 側で別オプション
+  // として解釈される option smuggling を防ぐ。
+  assert.throws(
+    () => buildWslSpawnArgs({ ...BASE_OPTIONS, wslDistro: "--exec" }),
+    /unsafe value for WSL distro/,
+  );
+  assert.throws(
+    () => buildWslSpawnArgs({ ...BASE_OPTIONS, wslUser: "--system" }),
+    /unsafe value for WSL user/,
+  );
+});
+
+test("buildWslSpawnArgs: 空白やシェルメタ文字を含む distro/user を拒否", () => {
+  assert.throws(
+    () => buildWslSpawnArgs({ ...BASE_OPTIONS, wslDistro: "Ubuntu 22.04" }),
+    /unsafe value for WSL distro/,
+  );
+  assert.throws(
+    () => buildWslSpawnArgs({ ...BASE_OPTIONS, wslUser: "ubuntu&whoami" }),
+    /unsafe value for WSL user/,
+  );
+});
+
+test("buildWslSpawnArgs: 実在しうる distro/user 名は通す", () => {
+  const args = buildWslSpawnArgs({
+    ...BASE_OPTIONS,
+    wslDistro: "Ubuntu-22.04",
+    wslUser: "dev_user-1",
+  });
+  assert.deepEqual(args.slice(0, 4), ["-d", "Ubuntu-22.04", "-u", "dev_user-1"]);
+});
