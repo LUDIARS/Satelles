@@ -1,0 +1,17 @@
+{
+  "name": "session-runtime",
+  "description": "プロセスとしての Satelles。 CLI 入口、 設定、 Concordia への報告、 transcript の送出、 版数。",
+  "presetRules": [],
+  "templateRules": [],
+  "membership": [
+    {
+      "pathPattern": "(^|/)src/(?:cli|index|config|concordia-client|transcript-sink|version)\\.ts$"
+    },
+    {
+      "pathPattern": "(^|/)bin/[^/]+$"
+    },
+    {
+      "pathPattern": "(^|/)tests/config\\.test\\.ts$"
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "name": "prompt-assembly",
+  "description": "委託プロンプトの組み立て。 seed とメモリ、 注入元の判定、 ask マーカーの受け渡しを一つの入力にまとめる。",
+  "presetRules": [],
+  "templateRules": [],
+  "membership": [
+    {
+      "pathPattern": "(^|/)src/(?:prompt-assemble|memory-loader|inject-origin|ask-json|ask-marker)\\.ts$"
+    },
+    {
+      "pathPattern": "(^|/)tests/(?:prompt|memory|inject|ask)[a-z0-9-]*\\.test\\.ts$"
+    }
+  ]
+}
