@@ -1,0 +1,12 @@
+{
+  "name": "run-configuration",
+  "description": "実行時設定の正本層。CLI 引数と SATELLES_* env の parse・検証 (fail-fast)、config → codex override 変換、バージョン定数を持つ。設定の消費側 (runtime / 配送) の振る舞いは持たない。",
+  "presetRules": [],
+  "templateRules": [],
+  "membership": [
+    { "pathPattern": "(^|/)src/config\\.ts$" },
+    { "pathPattern": "(^|/)src/cli\\.ts$" },
+    { "pathPattern": "(^|/)src/version\\.ts$" },
+    { "pathPattern": "(^|/)tests/config\\.test\\.ts$" }
+  ]
+}

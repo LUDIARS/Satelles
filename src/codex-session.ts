@@ -65,6 +65,12 @@ export interface StartSatellesCodexSessionOptions {
   configOverrides?: string[];
   /** `"native"` (既定) か `"wsl"` (WSL 内 Linux codex への spawn 差替え)。 */
   runtime?: "native" | "wsl";
+  /**
+   * `"workspace-write"` (既定) か `"danger-full-access"` (sandbox 起動を外す)。
+   * runtime=native で Windows 版 codex の sandbox launcher が持つ lsass
+   * ログオンセッションリーク (upstream #33356 / #35940) を踏まないための迂回。
+   */
+  sandbox?: "workspace-write" | "danger-full-access";
   wslDistro?: string;
   wslUser?: string;
   wslCodexBinary?: string;
@@ -100,6 +106,20 @@ export interface TurnResult {
 }
 
 const DEFAULT_TURN_TIMEOUT_MS = 4 * 60 * 60 * 1_000;
+
+function turnSandboxPolicy(
+  sandbox: "workspace-write" | "danger-full-access",
+  cwd: string,
+  networkAccess: boolean,
+) {
+  if (sandbox === "danger-full-access") return { type: "dangerFullAccess" } as const;
+  return {
+    type: "workspaceWrite",
+    writableRoots: [cwd],
+    networkAccess,
+  } as const;
+}
+
 /**
  * `stallTimeoutMs` 未指定時の保険値 (ライブラリとしての既定)。
  *
@@ -150,6 +170,7 @@ export class SatellesCodexSession {
     public readonly identity: CodexSessionIdentity,
     private readonly mapper: CodexEventFrameMapper,
     private readonly runtime: "native" | "wsl" | undefined,
+    private readonly sandbox: "workspace-write" | "danger-full-access",
   ) {}
 
   static async start(options: StartSatellesCodexSessionOptions): Promise<SatellesCodexSession> {
@@ -170,11 +191,12 @@ export class SatellesCodexSession {
     try {
       // WSL 内 codex には JSON-RPC `thread/start` の cwd も WSL パスで渡す。
       const bootstrapCwd = codexRuntimeCwd(options.runtime, options.cwd);
+      const sandbox = options.sandbox ?? "workspace-write";
       const identity = await bootstrapCodexSession(client, options.sink, {
         cwd: bootstrapCwd,
         clientVersion: options.clientVersion,
         approvalPolicy: "never",
-        sandbox: "workspace-write",
+        sandbox,
       });
       return new SatellesCodexSession(
         client,
@@ -182,6 +204,7 @@ export class SatellesCodexSession {
         identity,
         new CodexEventFrameMapper(identity.threadId),
         options.runtime,
+        sandbox,
       );
     } catch (error) {
       await client.close().catch(() => undefined);
@@ -401,11 +424,11 @@ export class SatellesCodexSession {
           input: [{ type: "text", text: options.prompt }],
           cwd: codexCwd,
           approvalPolicy: "never",
-          sandboxPolicy: {
-            type: "workspaceWrite",
-            writableRoots: [codexCwd],
-            networkAccess: options.networkAccess === true,
-          },
+          sandboxPolicy: turnSandboxPolicy(
+            this.sandbox,
+            codexCwd,
+            options.networkAccess === true,
+          ),
         });
       } catch (error) {
         throw new CodexTurnError(

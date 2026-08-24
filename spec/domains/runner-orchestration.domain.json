@@ -1,0 +1,13 @@
+{
+  "name": "runner-orchestration",
+  "description": "1 実行の編成層。config を受けて codex session と Concordia 連携を束ね、one-shot run / interactive serve のライフサイクル、プロンプト組み立て、repo memory 注入を持つ。個々の境界 (codex-runtime / concordia-link) の内部実装は持たない。",
+  "presetRules": [],
+  "templateRules": [],
+  "membership": [
+    { "pathPattern": "(^|/)src/runner\\.ts$" },
+    { "pathPattern": "(^|/)src/index\\.ts$" },
+    { "pathPattern": "(^|/)src/prompt-assemble\\.ts$" },
+    { "pathPattern": "(^|/)src/memory-loader\\.ts$" },
+    { "pathPattern": "(^|/)tests/(prompt-assemble|runner-input)\\.test\\.ts$" }
+  ]
+}

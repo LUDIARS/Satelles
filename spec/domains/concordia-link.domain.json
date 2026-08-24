@@ -1,0 +1,14 @@
+{
+  "name": "concordia-link",
+  "description": "Concordia 連携境界。session 登録 / transcript-frame 配送 / pending-question / ask マーカー・ask JSON の解釈と inject の出所判定を持つ。best-effort 方針 (coordinator 停止で standalone degrade) はこの層の契約。codex 自体の制御は持たない。",
+  "presetRules": [],
+  "templateRules": [],
+  "membership": [
+    { "pathPattern": "(^|/)src/concordia-client\\.ts$" },
+    { "pathPattern": "(^|/)src/transcript-sink\\.ts$" },
+    { "pathPattern": "(^|/)src/inject-origin\\.ts$" },
+    { "pathPattern": "(^|/)src/ask-json\\.ts$" },
+    { "pathPattern": "(^|/)src/ask-marker\\.ts$" },
+    { "pathPattern": "(^|/)tests/(ask-marker|inject-origin)\\.test\\.ts$" }
+  ]
+}

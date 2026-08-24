@@ -43,6 +43,12 @@ Env:
                                      WSL instead of the Windows binary (avoids the
                                      lsass logon-session leak in codex.exe's sandbox
                                      launcher; requires \`codex login\` inside WSL)
+  SATELLES_CODEX_SANDBOX            workspace-write (default) | danger-full-access —
+                                     drop the codex sandbox entirely. Escape hatch for
+                                     runtime=native on Windows where the sandbox
+                                     launcher (CreateProcessWithLogonW) leaks lsass
+                                     logon sessions (upstream #33356 / #35940).
+                                     Requires a trusted local delegation run.
   SATELLES_WSL_DISTRO               WSL distro for runtime=wsl (default: Ubuntu)
   SATELLES_WSL_USER                 WSL user for runtime=wsl (default: ubuntu)
   SATELLES_WSL_CODEX_BINARY         codex command inside WSL (default: codex,

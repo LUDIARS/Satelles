@@ -4,6 +4,8 @@ import { readFileSync } from "node:fs";
 
 export type CodexRuntime = "native" | "wsl";
 
+export type CodexSandbox = "workspace-write" | "danger-full-access";
+
 export interface SatellesRunConfig {
   /** Concordia session id (satelles-<uuid> / 委託時は env から引き継ぎ可)。 */
   sessionId: string;
@@ -19,6 +21,14 @@ export interface SatellesRunConfig {
   wslUser: string;
   /** runtime="wsl" のとき WSL 内で解決する codex コマンド名。native では未使用。 */
   wslCodexBinary: string;
+  /**
+   * codex に渡す sandbox。既定 "workspace-write"。"danger-full-access" は
+   * sandbox 起動そのものを外す — Windows 版 codex.exe の sandbox launcher
+   * (`CreateProcessWithLogonW`) が lsass ログオンセッションをリークする
+   * (upstream openai/codex #33356 / #35940) 環境で、runtime=native のまま
+   * リーク経路を踏まないための迂回。信頼済みローカル委託専用。
+   */
+  codexSandbox: CodexSandbox;
   model: string | null;
   effort: string | null;
   /** ターン 0 のタスクプロンプト。interactive serve では null 可。 */
@@ -234,6 +244,28 @@ export function parseRunConfig(
     errors.push(`invalid SATELLES_CODEX_RUNTIME: ${rawRuntime} (must be native or wsl)`);
   }
 
+  const rawSandbox = env.SATELLES_CODEX_SANDBOX?.trim() || "workspace-write";
+  let codexSandbox: CodexSandbox = "workspace-write";
+  if (rawSandbox === "workspace-write" || rawSandbox === "danger-full-access") {
+    codexSandbox = rawSandbox;
+  } else {
+    errors.push(
+      `invalid SATELLES_CODEX_SANDBOX: ${rawSandbox} (must be workspace-write or danger-full-access)`,
+    );
+  }
+  if (codexSandbox === "danger-full-access") {
+    if (codexRuntime !== "native") {
+      errors.push(
+        "SATELLES_CODEX_SANDBOX=danger-full-access requires SATELLES_CODEX_RUNTIME=native",
+      );
+    }
+    if (!delegationRunId) {
+      errors.push(
+        "SATELLES_CODEX_SANDBOX=danger-full-access requires CONCORDIA_DELEGATION_RUN_ID",
+      );
+    }
+  }
+
   const config: SatellesRunConfig = {
     sessionId: sessionId ?? env.SATELLES_SESSION_ID?.trim() ?? `satelles-${randomUUID()}`,
     provider: "codex-sdk",
@@ -244,6 +276,7 @@ export function parseRunConfig(
     wslDistro: env.SATELLES_WSL_DISTRO?.trim() || "Ubuntu",
     wslUser: env.SATELLES_WSL_USER?.trim() || "ubuntu",
     wslCodexBinary: env.SATELLES_WSL_CODEX_BINARY?.trim() || "codex",
+    codexSandbox,
     model: resolvedModel,
     effort: resolvedEffort,
     taskPrompt,

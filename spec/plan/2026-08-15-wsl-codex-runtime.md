@@ -188,6 +188,22 @@ WSL 内の codex は当然 POSIX パスしか解釈できないため、`runtime
   (既定 `"native"`) — 既存の呼び出し (`spawnProcess` 注入によるテスト等)
   はそのまま動く。
 
+## native Windows sandbox の一時的な迂回
+
+WSL へ移行できない信頼済みローカル委託に限り、
+`SATELLES_CODEX_SANDBOX=danger-full-access` で Windows sandbox launcher を
+通らない経路を選べる。既定は `workspace-write` のまま維持し、設定値は
+`parseRunConfig()` で列挙検証する。意図しない非 sandbox 実行を防ぐため、
+`danger-full-access` は `SATELLES_CODEX_RUNTIME=native` かつ
+`CONCORDIA_DELEGATION_RUN_ID` がある場合だけ受理し、それ以外は fail-fast する。
+
+選択した値は `thread/start.sandbox` と各 `turn/start.sandboxPolicy` の両方へ
+一貫して渡す。後者は `danger-full-access` を `{ type: "dangerFullAccess" }`、
+既定を cwd / network 制約付きの `{ type: "workspaceWrite", ... }` に変換する。
+偽 app-server を使うプロトコルテストで両境界と既定値を検証する。
+実機確認では native Windows の信頼済み委託をこの設定で完走させ、sandbox
+launcher 由来の lsass ログオンセッションが増加しないことを観測する。
+
 ## テスト方針
 
 - `tests/wsl-path.test.ts`: `windowsPathToWslPath()` の単体テスト

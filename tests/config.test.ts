@@ -156,6 +156,44 @@ test("parseRunConfig: SATELLES_CODEX_RUNTIME=wsl と WSL 補助 env を読む", 
   assert.equal(config.wslCodexBinary, "/home/coder/.local/bin/codex");
 });
 
+test("parseRunConfig: SATELLES_CODEX_SANDBOX 既定は workspace-write", () => {
+  const { config, errors } = parseRunConfig(["--prompt", "x"], BARE_ENV);
+  assert.deepEqual(errors, []);
+  assert.equal(config.codexSandbox, "workspace-write");
+});
+
+test("parseRunConfig: SATELLES_CODEX_SANDBOX=danger-full-access を読む", () => {
+  const { config, errors } = parseRunConfig(["--prompt", "x"], {
+    SATELLES_CODEX_SANDBOX: "danger-full-access",
+    CONCORDIA_DELEGATION_RUN_ID: "run-trusted-local",
+  } as NodeJS.ProcessEnv);
+  assert.deepEqual(errors, []);
+  assert.equal(config.codexSandbox, "danger-full-access");
+});
+
+test("parseRunConfig: danger-full-access は委託 run 以外では拒否する", () => {
+  const { errors } = parseRunConfig(["--prompt", "x"], {
+    SATELLES_CODEX_SANDBOX: "danger-full-access",
+  } as NodeJS.ProcessEnv);
+  assert.ok(errors.some((e) => e.includes("requires CONCORDIA_DELEGATION_RUN_ID")));
+});
+
+test("parseRunConfig: danger-full-access は WSL runtime では拒否する", () => {
+  const { errors } = parseRunConfig(["--prompt", "x"], {
+    SATELLES_CODEX_RUNTIME: "wsl",
+    SATELLES_CODEX_SANDBOX: "danger-full-access",
+    CONCORDIA_DELEGATION_RUN_ID: "run-trusted-local",
+  } as NodeJS.ProcessEnv);
+  assert.ok(errors.some((e) => e.includes("requires SATELLES_CODEX_RUNTIME=native")));
+});
+
+test("parseRunConfig: 不正な SATELLES_CODEX_SANDBOX はエラー (既定へ黙って落とさない)", () => {
+  const { errors } = parseRunConfig(["--prompt", "x"], {
+    SATELLES_CODEX_SANDBOX: "read-only",
+  } as NodeJS.ProcessEnv);
+  assert.ok(errors.some((e) => e.includes("invalid SATELLES_CODEX_SANDBOX")));
+});
+
 test("parseRunConfig: 不正な SATELLES_CODEX_RUNTIME はエラー (runner 内 throw にしない)", () => {
   const { errors } = parseRunConfig(["--prompt", "x"], {
     SATELLES_CODEX_RUNTIME: "docker",

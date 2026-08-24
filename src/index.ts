@@ -20,7 +20,7 @@ export type { TranscriptFrameSink } from "./transcript-sink.js";
 export { assemblePreamble, composeFirstTurnPrompt, loadSkillTexts } from "./prompt-assemble.js";
 export { findRepoMemories, renderMemoryDigest, memoryDirForCwd, repoLeafFromCwd } from "./memory-loader.js";
 export { parseRunConfig, buildConfigOverrides } from "./config.js";
-export type { SatellesRunConfig, CodexRuntime } from "./config.js";
+export type { SatellesRunConfig, CodexRuntime, CodexSandbox } from "./config.js";
 export { runSatelles } from "./runner.js";
 export { main } from "./cli.js";
 export { SATELLES_VERSION } from "./version.js";

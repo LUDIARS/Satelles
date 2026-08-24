@@ -135,6 +135,7 @@ export async function runSatelles(config: SatellesRunConfig, deps?: RunnerDeps):
     clientVersion: SATELLES_VERSION,
     configOverrides: buildConfigOverrides(config),
     runtime: config.codexRuntime,
+    sandbox: config.codexSandbox,
     wslDistro: config.wslDistro,
     wslUser: config.wslUser,
     wslCodexBinary: config.wslCodexBinary,

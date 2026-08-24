@@ -64,6 +64,8 @@ interface FakeServerOptions {
    * turn-1 の turn/completed を usage 付きで流す。
    */
   zombieUsageOnSecondStart?: boolean;
+  sandbox?: "workspace-write" | "danger-full-access";
+  onRequest?: (message: Record<string, unknown>) => void;
 }
 
 /** ハンドシェイクと turn/start だけ話す最小 app-server。 */
@@ -105,6 +107,7 @@ function fakeCodexAppServer(options: FakeServerOptions = {}): ChildProcessWithou
       if (!line) continue;
       const message = JSON.parse(line) as { id?: number; method?: string };
       if (message.id === undefined) continue; // notification
+      options.onRequest?.(message as Record<string, unknown>);
       switch (message.method) {
         case "initialize":
           send({ jsonrpc: "2.0", id: message.id, result: {} });
@@ -178,9 +181,63 @@ async function startFakeSession(
     env: process.env,
     sink,
     clientVersion: "test",
+    sandbox: options.sandbox,
     spawnProcess: () => fakeCodexAppServer(options),
   });
 }
+
+test("sandbox 設定を thread/start と turn/start の両方へ渡す", async () => {
+  const requests: Array<Record<string, unknown>> = [];
+  const session = await startFakeSession(new RecordingSink(), {
+    sandbox: "danger-full-access",
+    onRequest: (message) => requests.push(message),
+  });
+  try {
+    await session.runTurn({
+      prompt: "hello",
+      cwd: process.cwd(),
+      stallTimeoutMs: 5_000,
+    });
+    const threadStart = requests.find((request) => request.method === "thread/start");
+    const turnStart = requests.find((request) => request.method === "turn/start");
+    assert.ok(threadStart);
+    assert.ok(turnStart);
+    assert.equal((threadStart.params as Record<string, unknown>).sandbox, "danger-full-access");
+    assert.deepEqual(
+      (turnStart.params as Record<string, unknown>).sandboxPolicy,
+      { type: "dangerFullAccess" },
+    );
+  } finally {
+    session.terminate();
+  }
+});
+
+test("既定 sandbox は workspace-write と cwd/network 制約を維持する", async () => {
+  const requests: Array<Record<string, unknown>> = [];
+  const cwd = process.cwd();
+  const session = await startFakeSession(new RecordingSink(), {
+    onRequest: (message) => requests.push(message),
+  });
+  try {
+    await session.runTurn({
+      prompt: "hello",
+      cwd,
+      networkAccess: true,
+      stallTimeoutMs: 5_000,
+    });
+    const threadStart = requests.find((request) => request.method === "thread/start");
+    const turnStart = requests.find((request) => request.method === "turn/start");
+    assert.ok(threadStart);
+    assert.ok(turnStart);
+    assert.equal((threadStart.params as Record<string, unknown>).sandbox, "workspace-write");
+    assert.deepEqual(
+      (turnStart.params as Record<string, unknown>).sandboxPolicy,
+      { type: "workspaceWrite", writableRoots: [cwd], networkAccess: true },
+    );
+  } finally {
+    session.terminate();
+  }
+});
 
 test("完了ターンの usage が codex_usage frame として出る", async () => {
   const sink = new RecordingSink();

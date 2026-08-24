@@ -1,0 +1,16 @@
+{
+  "name": "codex-runtime",
+  "description": "codex app-server の起動と会話境界。app-server の spawn (native / WSL)、thread/turn の bootstrap、sandbox / approval ポリシー、イベントフレーム変換、停滞タイマー、子 env 構築を持つ。Concordia への配送や CLI 解釈は持たない。",
+  "presetRules": [],
+  "templateRules": [],
+  "membership": [
+    { "pathPattern": "(^|/)src/codex-app-server-client\\.ts$" },
+    { "pathPattern": "(^|/)src/codex-bootstrap\\.ts$" },
+    { "pathPattern": "(^|/)src/codex-session\\.ts$" },
+    { "pathPattern": "(^|/)src/codex-event-frames\\.ts$" },
+    { "pathPattern": "(^|/)src/wsl-path\\.ts$" },
+    { "pathPattern": "(^|/)src/child-env\\.ts$" },
+    { "pathPattern": "(^|/)src/turn-stall-timer\\.ts$" },
+    { "pathPattern": "(^|/)tests/(codex-app-server-client-wsl|child-env|turn-stall|turn-stall-timer|turn-usage|turn-usage-frame|wsl-path)\\.test\\.ts$" }
+  ]
+}
