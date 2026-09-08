@@ -9,6 +9,15 @@ const BASE_OPTIONS = {
   env: {} as NodeJS.ProcessEnv,
 };
 
+test("WSL receives the current sidecar identity without forwarding arbitrary parent env", () => {
+  const script = buildWslSpawnArgs({ ...BASE_OPTIONS, env: {
+    LICTOR_PORT: "54321", LICTOR_SESSION_ID: "satelles-child", PARENT_SECRET: "not-for-wsl",
+  } })[7];
+  assert.match(script, /export LICTOR_PORT='54321'/);
+  assert.match(script, /export LICTOR_SESSION_ID='satelles-child'/);
+  assert.doesNotMatch(script, /PARENT_SECRET|not-for-wsl/);
+});
+
 test("buildWslSpawnArgs: distro/user 既定値と cwd 変換", () => {
   const args = buildWslSpawnArgs(BASE_OPTIONS);
   assert.deepEqual(args.slice(0, 4), ["-d", "Ubuntu", "-u", "ubuntu"]);

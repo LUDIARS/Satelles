@@ -59,6 +59,14 @@ export class ConcordiaClient {
     await this.fetchJson("PATCH", `/v1/sessions/${encodeURIComponent(id)}`, patch);
   }
 
+  async chat(id: string, payload: { channel: string; text: string; scope?: string; in_reply_to?: number; attachment_paths?: string[] }): Promise<unknown> {
+    return this.fetchJson("POST", "/v1/chat", { ...payload, session_id: id, author_label: "satelles" });
+  }
+
+  async report(id: string, monologue: string): Promise<unknown> {
+    return this.fetchJson("POST", `/v1/reports/${encodeURIComponent(id)}/append`, { role: "satelles", monologue });
+  }
+
   async event(id: string, payload: { kind: string; payload?: unknown }): Promise<void> {
     await this.fetchJson("POST", `/v1/sessions/${encodeURIComponent(id)}/event`, payload);
   }

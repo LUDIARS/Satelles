@@ -31,9 +31,10 @@ import {
   type TranscriptFrameSink,
 } from "./transcript-sink.js";
 import { SATELLES_VERSION } from "./version.js";
+import { startSessionSidecar, type SessionSidecar } from "./session-sidecar.js";
 
 interface IncomingInput {
-  kind: "inject" | "answer";
+  kind: "inject" | "answer" | "shutdown";
   text: string;
   questionId: number | null;
   /** Concordia の session.inject source。人間 / 自動の判別に使う (answer は null)。 */
@@ -88,6 +89,11 @@ export async function runSatelles(config: SatellesRunConfig, deps?: RunnerDeps):
   const inputs = new InputQueue();
   let liveness: LivenessHandle | null = null;
   let registered = false;
+  let sidecar: SessionSidecar | null = null;
+  let shutdownRequested = false;
+  if (config.delegationRunId && !concordia) {
+    throw new Error("Delegated Satelles requires Concordia and a session sidecar");
+  }
 
   let sink: TranscriptFrameSink;
   if (concordia) {
@@ -119,7 +125,11 @@ export async function runSatelles(config: SatellesRunConfig, deps?: RunnerDeps):
       // Concordia 停止時は単体実行に degrade (CLAUDE.md 不変条件: coordinator
       // 停止でユーザに stack trace を見せない)。ただし interactive は入力経路が
       // Concordia しか無いので致命エラー。
-      if (config.interactive) throw error;
+      if (config.interactive || config.delegationRunId) {
+        liveness?.close();
+        if (registered) await concordia.unregister(config.sessionId);
+        throw error;
+      }
       log(`Concordia unavailable, running standalone: ${(error as Error).message}`);
       sink = new VolatileTranscriptSink();
     }
@@ -127,20 +137,42 @@ export async function runSatelles(config: SatellesRunConfig, deps?: RunnerDeps):
     sink = new VolatileTranscriptSink();
   }
 
-  const session = await SatellesCodexSession.start({
-    binary: config.codexBinary,
-    cwd: config.cwd,
-    env: buildCodexChildEnv(process.env),
-    sink,
-    clientVersion: SATELLES_VERSION,
-    configOverrides: buildConfigOverrides(config),
-    runtime: config.codexRuntime,
-    sandbox: config.codexSandbox,
-    wslDistro: config.wslDistro,
-    wslUser: config.wslUser,
-    wslCodexBinary: config.wslCodexBinary,
-    onDiagnostic: (message) => log(`codex app-server: ${message}`),
-  });
+  let session: SatellesCodexSession;
+  try {
+    if (registered && concordia) {
+      sidecar = await startSessionSidecar({
+        sessionId: config.sessionId,
+        concordia,
+        requestShutdown: () => {
+          if (shutdownRequested) return;
+          shutdownRequested = true;
+          // Wake an idle serve/ask wait; an active turn is allowed to flush first.
+          inputs.push({ kind: "shutdown", text: "", questionId: null, source: null });
+        },
+      });
+    }
+    session = await SatellesCodexSession.start({
+      binary: config.codexBinary,
+      cwd: config.cwd,
+      env: buildCodexChildEnv(process.env, sidecar ? { port: sidecar.port, sessionId: config.sessionId } : undefined),
+      sink,
+      clientVersion: SATELLES_VERSION,
+      configOverrides: buildConfigOverrides(config),
+      runtime: config.codexRuntime,
+      sandbox: config.codexSandbox,
+      wslDistro: config.wslDistro,
+      wslUser: config.wslUser,
+      wslCodexBinary: config.wslCodexBinary,
+      onDiagnostic: (message) => log(`codex app-server: ${message}`),
+    });
+  } catch (error) {
+    try { await sidecar?.close(); }
+    finally {
+      liveness?.close();
+      if (concordia && registered) await concordia.unregister(config.sessionId);
+    }
+    throw error;
+  }
   log(
     `Codex thread bound (${session.identity.threadId}) auth=${session.identity.authType}` +
     `${session.identity.planType ? `/${session.identity.planType}` : ""}`,
@@ -173,6 +205,7 @@ export async function runSatelles(config: SatellesRunConfig, deps?: RunnerDeps):
       askMarker: registered,
       skills: loadSkillTexts(config.skillsDir),
       memory: config.memory,
+      sidecarRuntime: sidecar ? config.codexRuntime : undefined,
     });
 
     let nextInput: string;
@@ -186,6 +219,7 @@ export async function runSatelles(config: SatellesRunConfig, deps?: RunnerDeps):
     }
 
     for (;;) {
+      if (shutdownRequested) break;
       let result: Awaited<ReturnType<typeof session.runTurn>>;
       try {
         result = await session.runTurn({
@@ -230,6 +264,7 @@ export async function runSatelles(config: SatellesRunConfig, deps?: RunnerDeps):
         await clearStallNotice(concordia, registered, config.sessionId);
       }
 
+      if (shutdownRequested) break;
       const ask = parseAskMarkerText(result.agentText);
       if (ask) {
         let questionId: number | null = null;
@@ -265,8 +300,11 @@ export async function runSatelles(config: SatellesRunConfig, deps?: RunnerDeps):
     process.removeListener("SIGINT", stop);
     process.removeListener("SIGTERM", stop);
     session.terminate();
-    liveness?.close();
-    if (concordia && registered) await concordia.unregister(config.sessionId);
+    try { await sidecar?.close(); }
+    finally {
+      liveness?.close();
+      if (concordia && registered) await concordia.unregister(config.sessionId);
+    }
   }
 }
 
@@ -384,6 +422,10 @@ export async function waitForAnswer(
   };
   for (;;) {
     const input = await inputs.take();
+    if (input.kind === "shutdown") {
+      restore();
+      return "";
+    }
     if (input.kind === "answer") {
       // question_id 不一致の answer は他の質問の答え。従来どおり捨てる。
       if (questionId === null || input.questionId === questionId) {

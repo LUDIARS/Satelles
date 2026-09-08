@@ -3,6 +3,18 @@ import test from "node:test";
 
 import { NON_INTERACTIVE_ENV, buildCodexChildEnv } from "../src/child-env.js";
 
+test("worker sidecar replaces parent identity including Windows case variants", () => {
+  const base = { LICTOR_PORT: "1234", lictor_port: "4321", LICTOR_SESSION_ID: "parent" };
+  const env = buildCodexChildEnv(base, { port: 54321, sessionId: "child" });
+  assert.equal(env.LICTOR_PORT, "54321");
+  assert.equal(env.LICTOR_SESSION_ID, "child");
+  assert.equal(env.lictor_port, undefined);
+  assert.equal(base.LICTOR_SESSION_ID, "parent");
+  const standalone = buildCodexChildEnv(base);
+  assert.equal(standalone.LICTOR_PORT, undefined);
+  assert.equal(standalone.LICTOR_SESSION_ID, undefined);
+});
+
 test("非対話設定を親 env に重ねる", () => {
   const env = buildCodexChildEnv({ PATH: "/usr/bin", HOME: "/home/x" });
   assert.equal(env.PATH, "/usr/bin");

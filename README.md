@@ -46,6 +46,14 @@ API キーのどちらでもそのまま使える (`account/read` 経由で検�
 
 ## CLI
 
+Concordia登録済みのSatellesは、同じプロセス内にセッション専用のloopback窓口を
+開き、子Codexへ `LICTOR_PORT` / `LICTOR_SESSION_ID` を渡す。パートタイマーは
+既存の `/v1/chat`・`/v1/report`・`/v1/lictor/task`・`/v1/internal/send-file`・
+`/v1/shutdown` を利用できる。LictorプロセスやPTYは追加しない。
+退勤要求は現在のターンと転記の完了後に終了する。対応API・WSLの接続方法は
+[session sidecar契約](spec/plan/session-sidecar.md) を参照。
+委託runでConcordia登録に失敗した場合は、協調不能のまま作業を始めず明示的に失敗する。
+
 ```sh
 satelles run -p task.md [--model gpt-5.6-sol] [--effort xhigh] [--network]
 satelles serve [--session-id satelles-xxx]     # 常駐対話 (session.inject 待ち)

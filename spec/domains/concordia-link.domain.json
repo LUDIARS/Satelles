@@ -4,6 +4,8 @@
   "presetRules": [],
   "templateRules": [],
   "membership": [
+    { "pathPattern": "(^|/)src/session-sidecar(-routes)?\\.ts$" },
+    { "pathPattern": "(^|/)tests/session-sidecar\\.test\\.ts$" },
     { "pathPattern": "(^|/)src/concordia-client\\.ts$" },
     { "pathPattern": "(^|/)src/transcript-sink\\.ts$" },
     { "pathPattern": "(^|/)src/inject-origin\\.ts$" },

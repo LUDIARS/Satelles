@@ -43,8 +43,20 @@ export const NON_INTERACTIVE_ENV: Readonly<Record<string, string>> = Object.free
  */
 export function buildCodexChildEnv(
   base: NodeJS.ProcessEnv = process.env,
+  sidecar?: { port: number; sessionId: string },
 ): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...base, ...NON_INTERACTIVE_ENV };
+  // Never let a headless worker address the caller's Lictor session.
+  for (const key of Object.keys(env)) {
+    if (["LICTOR_PORT", "LICTOR_SESSION_ID"].includes(key.toUpperCase())) delete env[key];
+  }
+  if (sidecar) {
+    if (!Number.isInteger(sidecar.port) || sidecar.port < 1 || sidecar.port > 65535 || !sidecar.sessionId.trim()) {
+      throw new Error("invalid Satelles sidecar identity");
+    }
+    env.LICTOR_PORT = String(sidecar.port);
+    env.LICTOR_SESSION_ID = sidecar.sessionId;
+  }
   const inheritedSsh = base.GIT_SSH_COMMAND?.trim();
   if (inheritedSsh) {
     env.GIT_SSH_COMMAND = /BatchMode=/i.test(inheritedSsh)

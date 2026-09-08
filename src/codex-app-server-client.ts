@@ -455,9 +455,11 @@ function posixShellQuote(value: string): string {
  *
  * `options.cwd` (絶対 Windows パス) を `windowsPathToWslPath()` で WSL パスへ
  * 変換し、`bash -lc` 内で `cd` する。`buildCodexChildEnv()` の非対話設定
- * ({@link NON_INTERACTIVE_ENV} のキー) のみを `export` として明示注入する
+ * ({@link NON_INTERACTIVE_ENV} のキー) と、session sidecar の識別子
+ * (`LICTOR_PORT` / `LICTOR_SESSION_ID`) のみを `export` として明示注入する
  * (WSL は既定でホスト env を子へ渡さない上、`WSLENV` はエスケープ規則が弱いため
- * 使わない)。
+ * 使わない)。sidecar の listener は Windows ホスト側にあるので、WSL 内からは
+ * Windows の `curl.exe` 経由で到達する (`spec/plan/session-sidecar.md`)。
  */
 export function buildWslSpawnArgs(options: SpawnCodexAppServerOptions): string[] {
   const distro = wslOptionValue(options.wslDistro, "Ubuntu", "distro");
@@ -468,7 +470,7 @@ export function buildWslSpawnArgs(options: SpawnCodexAppServerOptions): string[]
   const overrides = (options.configOverrides ?? []).flatMap((kv) => ["-c", kv]);
   const codexArgs = ["app-server", ...overrides, "--listen", "stdio://"];
 
-  const exportStatements = Object.keys(NON_INTERACTIVE_ENV)
+  const exportStatements = [...Object.keys(NON_INTERACTIVE_ENV), "LICTOR_PORT", "LICTOR_SESSION_ID"]
     .filter((key) => options.env[key] !== undefined)
     .map((key) => `export ${key}=${posixShellQuote(String(options.env[key]))};`);
 

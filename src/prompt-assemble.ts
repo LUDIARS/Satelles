@@ -68,6 +68,8 @@ export interface AssemblePreambleOptions {
   memory: boolean;
   /** テスト注入用 override。省略時は cwd から解決。 */
   memoryDir?: string;
+  /** Present only when the runner has bound its own compatibility listener. */
+  sidecarRuntime?: "native" | "wsl";
 }
 
 /**
@@ -75,6 +77,14 @@ export interface AssemblePreambleOptions {
  */
 export function assemblePreamble(options: AssemblePreambleOptions): string {
   const sections: string[] = [];
+  if (options.sidecarRuntime) {
+    sections.push([
+      "Satelles はこのセッション専用の Lictor 互換窓口を提供しています。LICTOR_PORT と LICTOR_SESSION_ID は子プロセスに設定済みです。",
+      "報告・会話・task登録・添付・退勤はこの窓口を使ってください。他セッションのポートやIDを流用しないでください。",
+      "POST /v1/shutdown は退勤要求を受け付け、現在のターンの完了と転記を待って終了します。要求後は最終報告でターンを終えてください。",
+      ...(options.sidecarRuntime === "wsl" ? ["窓口はWindows側にあります。WSLからはWindowsの curl.exe で http://127.0.0.1:$LICTOR_PORT に接続してください。"] : []),
+    ].join("\n"));
+  }
   if (options.askMarker) sections.push(ASK_MARKER_COMMON.trim());
   for (const skill of options.skills) {
     sections.push(`# Skill: ${skill.name}\n\n${skill.body}`);

@@ -4,6 +4,14 @@ import { handleWsEvent, InputQueue, waitForAnswer } from "../src/runner.js";
 
 const SID = "satelles-own";
 
+test("shutdown wakes an ask wait without treating automated injects as human answers", async () => {
+  const q = new InputQueue();
+  q.push({ kind: "inject", text: "later", questionId: null, source: "auto:stall-nudge" });
+  q.push({ kind: "shutdown", text: "", questionId: null, source: null });
+  assert.equal(await waitForAnswer(q, 12), "");
+  assert.equal((await q.take()).text, "later");
+});
+
 test("handleWsEvent: 自分宛 session.inject をキューへ", async () => {
   const q = new InputQueue();
   handleWsEvent({ type: "session.inject", target_session_id: SID, text: "hello" }, SID, q);
