@@ -26,7 +26,8 @@ export interface SatellesRunConfig {
    * sandbox 起動そのものを外す — Windows 版 codex.exe の sandbox launcher
    * (`CreateProcessWithLogonW`) が lsass ログオンセッションをリークする
    * (upstream openai/codex #33356 / #35940) 環境で、runtime=native のまま
-   * リーク経路を踏まないための迂回。信頼済みローカル委託専用。
+   * リーク経路を踏まないための迂回。Concordia が起動した信頼済みのローカル
+   * セッション専用 (委託 run、または Cc spawn の相関 ID を持つ対話 serve)。
    */
   codexSandbox: CodexSandbox;
   model: string | null;
@@ -259,9 +260,11 @@ export function parseRunConfig(
         "SATELLES_CODEX_SANDBOX=danger-full-access requires SATELLES_CODEX_RUNTIME=native",
       );
     }
-    if (!delegationRunId) {
+    // 付与の可否は Concordia (spawner の currentSatellesSandboxEnv) が決める。
+    // ここでは Cc 起動の印 (委託 run ID か spawn 相関 ID) が無い手動起動を拒む。
+    if (!delegationRunId && !env.CONCORDIA_SPAWN_ID?.trim()) {
       errors.push(
-        "SATELLES_CODEX_SANDBOX=danger-full-access requires CONCORDIA_DELEGATION_RUN_ID",
+        "SATELLES_CODEX_SANDBOX=danger-full-access requires CONCORDIA_DELEGATION_RUN_ID or CONCORDIA_SPAWN_ID",
       );
     }
   }

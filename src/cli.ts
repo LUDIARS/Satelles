@@ -48,7 +48,9 @@ Env:
                                      runtime=native on Windows where the sandbox
                                      launcher (CreateProcessWithLogonW) leaks lsass
                                      logon sessions (upstream #33356 / #35940).
-                                     Requires a trusted local delegation run.
+                                     Requires a Concordia-launched session
+                                     (CONCORDIA_DELEGATION_RUN_ID or
+                                     CONCORDIA_SPAWN_ID).
   SATELLES_WSL_DISTRO               WSL distro for runtime=wsl (default: Ubuntu)
   SATELLES_WSL_USER                 WSL user for runtime=wsl (default: ubuntu)
   SATELLES_WSL_CODEX_BINARY         codex command inside WSL (default: codex,

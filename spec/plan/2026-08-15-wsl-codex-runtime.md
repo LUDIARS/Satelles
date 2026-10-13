@@ -197,6 +197,11 @@ WSL へ移行できない信頼済みローカル委託に限り、
 `danger-full-access` は `SATELLES_CODEX_RUNTIME=native` かつ
 `CONCORDIA_DELEGATION_RUN_ID` がある場合だけ受理し、それ以外は fail-fast する。
 
+2026-10-14 追記: Discord フォーラムから開く対話セッション (`satelles serve`) も
+Satelles へ移すため、`CONCORDIA_SPAWN_ID` (Cc spawn の相関 ID) がある場合も受理する。
+付与の可否は Concordia の spawner が決め (委託 run と Cc 管理のフォーラム起動だけ)、
+Satelles は Cc 起動の印が無い手動起動を拒む二段目の防御に留める。
+
 選択した値は `thread/start.sandbox` と各 `turn/start.sandboxPolicy` の両方へ
 一貫して渡す。後者は `danger-full-access` を `{ type: "dangerFullAccess" }`、
 既定を cwd / network 制約付きの `{ type: "workspaceWrite", ... }` に変換する。

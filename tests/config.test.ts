@@ -171,11 +171,22 @@ test("parseRunConfig: SATELLES_CODEX_SANDBOX=danger-full-access を読む", () =
   assert.equal(config.codexSandbox, "danger-full-access");
 });
 
-test("parseRunConfig: danger-full-access は委託 run 以外では拒否する", () => {
+test("parseRunConfig: danger-full-access は Cc 起動の印が無ければ拒否する", () => {
   const { errors } = parseRunConfig(["--prompt", "x"], {
     SATELLES_CODEX_SANDBOX: "danger-full-access",
   } as NodeJS.ProcessEnv);
-  assert.ok(errors.some((e) => e.includes("requires CONCORDIA_DELEGATION_RUN_ID")));
+  assert.ok(errors.some((e) => e.includes("requires CONCORDIA_DELEGATION_RUN_ID or CONCORDIA_SPAWN_ID")));
+});
+
+test("parseRunConfig: danger-full-access は Cc spawn の対話 serve でも読む", () => {
+  const { config, errors } = parseRunConfig(["--interactive"], {
+    SATELLES_CODEX_SANDBOX: "danger-full-access",
+    CONCORDIA_SPAWN_ID: "spawn-forum-1",
+  } as NodeJS.ProcessEnv);
+  assert.deepEqual(errors, []);
+  assert.equal(config.interactive, true);
+  assert.equal(config.codexSandbox, "danger-full-access");
+  assert.equal(config.spawnEnrollment, "spawn-forum-1");
 });
 
 test("parseRunConfig: danger-full-access は WSL runtime では拒否する", () => {
