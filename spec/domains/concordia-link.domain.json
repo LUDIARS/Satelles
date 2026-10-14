@@ -6,6 +6,8 @@
   "membership": [
     { "pathPattern": "(^|/)src/session-sidecar(-routes)?\\.ts$" },
     { "pathPattern": "(^|/)tests/session-sidecar\\.test\\.ts$" },
+    { "pathPattern": "(^|/)src/(runtime-model-effort|sidecar-port-publish)\\.ts$" },
+    { "pathPattern": "(^|/)tests/runtime-model-effort\\.test\\.ts$" },
     { "pathPattern": "(^|/)src/concordia-client\\.ts$" },
     { "pathPattern": "(^|/)src/transcript-sink\\.ts$" },
     { "pathPattern": "(^|/)src/inject-origin\\.ts$" },

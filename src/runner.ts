@@ -32,6 +32,8 @@ import {
 } from "./transcript-sink.js";
 import { SATELLES_VERSION } from "./version.js";
 import { startSessionSidecar, type SessionSidecar } from "./session-sidecar.js";
+import { RuntimeModelEffortState } from "./runtime-model-effort.js";
+import { publishSidecarPort } from "./sidecar-port-publish.js";
 
 interface IncomingInput {
   kind: "inject" | "answer" | "shutdown";
@@ -91,6 +93,7 @@ export async function runSatelles(config: SatellesRunConfig, deps?: RunnerDeps):
   let registered = false;
   let sidecar: SessionSidecar | null = null;
   let shutdownRequested = false;
+  const runtimeModelEffort = new RuntimeModelEffortState();
   if (config.delegationRunId && !concordia) {
     throw new Error("Delegated Satelles requires Concordia and a session sidecar");
   }
@@ -149,7 +152,9 @@ export async function runSatelles(config: SatellesRunConfig, deps?: RunnerDeps):
           // Wake an idle serve/ask wait; an active turn is allowed to flush first.
           inputs.push({ kind: "shutdown", text: "", questionId: null, source: null });
         },
+        runtimeModelEffort,
       });
+      await publishSidecarPort(concordia, config.sessionId, sidecar.port, log);
     }
     session = await SatellesCodexSession.start({
       binary: config.codexBinary,
@@ -226,6 +231,8 @@ export async function runSatelles(config: SatellesRunConfig, deps?: RunnerDeps):
           prompt: nextInput,
           cwd: config.cwd,
           networkAccess: config.networkAccess,
+          // Concordia の effort 変更は sidecar で受けて、ここ (次のターン) から効かせる。
+          ...runtimeModelEffort.forNextTurn(),
           turnTimeoutMs: config.turnTimeoutMs,
           stallTimeoutMs: config.stallTimeoutMs,
           onStall: ({ turnId, idleMs }) => {

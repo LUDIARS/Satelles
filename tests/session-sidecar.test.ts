@@ -31,6 +31,7 @@ function fixture() {
       patchSession: async (id: string, patch: unknown) => { calls.push({ id, patch }); },
     },
     requestShutdown: () => { shutdowns++; },
+    runtimeModelEffort: { apply: () => ({ ok: true as const, status: 200 as const, message: "queued" }) },
   };
   return { options, calls, shutdowns: () => shutdowns };
 }

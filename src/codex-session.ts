@@ -16,6 +16,7 @@ import {
   bootstrapCodexSession,
   type CodexSessionIdentity,
 } from "./codex-bootstrap.js";
+import { turnStartModelEffort } from "./runtime-model-effort.js";
 import type { TranscriptFrameSink } from "./transcript-sink.js";
 import { TurnStallTimer, type TurnStallTimerScheduler } from "./turn-stall-timer.js";
 import { codexRuntimeCwd } from "./wsl-path.js";
@@ -96,6 +97,12 @@ export interface RunTurnOptions {
   onStall?: (info: { turnId: string | null; idleMs: number }) => void;
   /** 既定 false (delegation 同等)。対話用途では true を推奨。 */
   networkAccess?: boolean;
+  /**
+   * このターン以降に使う model / reasoning effort (sidecar の runtime 切替)。
+   * null / 未指定なら送らず、thread の現在値 (起動時の -c override) を使う。
+   */
+  model?: string | null;
+  effort?: string | null;
 }
 
 export interface TurnResult {
@@ -429,6 +436,7 @@ export class SatellesCodexSession {
             codexCwd,
             options.networkAccess === true,
           ),
+          ...turnStartModelEffort(options),
         });
       } catch (error) {
         throw new CodexTurnError(

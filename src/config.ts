@@ -52,9 +52,9 @@ export interface ParseCliResult {
   errors: string[];
 }
 
-const VALID_EFFORT = new Set(["minimal", "low", "medium", "high", "xhigh", "ultra"]);
+export const VALID_EFFORT: ReadonlySet<string> = new Set(["minimal", "low", "medium", "high", "xhigh", "ultra"]);
 /** codex model id に許す安全文字集合 (`-c model=` へ生値で渡すため)。 */
-const MODEL_ID_RE = /^[A-Za-z0-9._:\/-]+$/;
+export const MODEL_ID_RE = /^[A-Za-z0-9._:\/-]+$/;
 
 /**
  * 無進捗上限の上限値。根拠は対話セッション — 人間が Discord の前で待つ

@@ -1,6 +1,7 @@
 /** Lictor-compatible requests bound to one registered Satelles session. */
 import { z } from "zod";
 import type { ConcordiaClient } from "./concordia-client.js";
+import { handleRuntimeModelEffort, type RuntimeModelEffortState } from "./runtime-model-effort.js";
 
 const chatSchema = z.object({
   channel: z.enum(["chitchat", "consultation", "報告", "ぼやき", "system", "genius"]),
@@ -22,6 +23,8 @@ export interface SessionSidecarRoutesOptions {
   sessionId: string;
   concordia: Pick<ConcordiaClient, "chat" | "report" | "patchSession">;
   requestShutdown: () => void;
+  /** Lictor-compatible `/v1/runtime/model-effort`; applied by the runner at the next turn. */
+  runtimeModelEffort: Pick<RuntimeModelEffortState, "apply">;
 }
 
 export class SessionSidecarRoutes {
@@ -42,6 +45,9 @@ export class SessionSidecarRoutes {
     }
     if (method === "POST" && path === "/v1/shutdown") {
       return { status: 200, body: { ok: true, shutdown_requested: true }, afterResponse: this.options.requestShutdown };
+    }
+    if (method === "POST" && path === "/v1/runtime/model-effort") {
+      return handleRuntimeModelEffort(this.options.runtimeModelEffort, body);
     }
     if (method === "POST" && path === "/v1/chat") {
       const parsed = chatSchema.safeParse(body);

@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "contractsDir": "src/contracts",
+  "importFrom": "./contract-runtime.js",
+  "contracts": [
+    { "id": "C-1", "criterion": "C-1 handleRuntimeModelEffort(state, body): Lictor と同じ body {model, effort} を受け、成功は 200 {ok:true, message}、欠落・不正値は 400 {error} を返す", "symbol": "handleRuntimeModelEffort", "file": "src/runtime-model-effort.ts", "module": "src/contracts/runtime-model-effort-reply.contract.ts", "mode": "observe", "sample": 1 },
+    { "id": "C-2", "criterion": "C-2 turnStartModelEffort(next): 受けた model / effort を次ターンの turn/start 引数に載せ、未設定の値は送らない", "symbol": "turnStartModelEffort", "file": "src/runtime-model-effort.ts", "module": "src/contracts/turn-start-model-effort.contract.ts", "mode": "observe", "sample": 1 },
+    { "id": "C-3", "criterion": "C-3 publishSidecarPort(concordia, sessionId, port, log): sidecar ポートを lictor_port ではなく satelles_sidecar_port で公開し、失敗しても例外を投げず false を返す", "symbol": "publishSidecarPort", "file": "src/sidecar-port-publish.ts", "module": "src/contracts/sidecar-port-publish.contract.ts", "mode": "observe", "sample": 1 }
+  ]
+}

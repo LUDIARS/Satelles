@@ -1,0 +1,7 @@
+{
+  "service": "satelles",
+  "include": ["src/**/*.ts"],
+  "exclude": ["src/contracts/**", "src/contract-runtime.ts"],
+  "runtime": { "autoImport": false },
+  "rules": { "contract-wrap": true }
+}
